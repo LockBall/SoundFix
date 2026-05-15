@@ -1,3 +1,5 @@
+"""Developer utility for checking bundled or PATH ffmpeg/ffprobe availability."""
+
 from pathlib import Path
 import sys
 

@@ -18,7 +18,7 @@ Generate multiple quieter versions of an audio file for game audio tuning.
 - Take one source audio file and export multiple files with different volume reductions.
 - Support peak analysis: AudioFix measures the source peak with ffmpeg and calculates the first gain value from raw peak plus headroom.
 - Let the user choose the minimum dB range and interval dB between outputs; AudioFix calculates the number of output files.
-- Write a success or failure log that records the settings, generated files, validation status, and ffmpeg commands.
+- Write a success or failure log that records the shared settings plus per-file gain and validation status.
 
 ## Design
 - WoW's files are Ogg Vorbis, so the initial target output format is Ogg Vorbis.

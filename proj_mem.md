@@ -51,6 +51,7 @@ Shared memory for coding agents. Keep this file concise and durable: architectur
 - Keep things modular and organized.
 - Keep conversion defaults, naming rules, and dB step calculations in one owner module.
 - Prefer one deterministic conversion path for GUI-triggered and future CLI-triggered runs.
+- GUI code must not own worker thread creation or conversion/analysis loops. Background execution belongs in `audiofix.core.tasks`; peak analysis belongs in `audiofix.core.analysis`; conversion execution belongs in `audiofix.core.conversion`.
 - Avoid third-party Python runtime libraries for the MVP unless the standard library becomes a real blocker.
 - Prefer bundled `ffmpeg`/`ffprobe` binaries for user-facing builds; system ffmpeg fallback is acceptable for development.
 - Check `ffmpeg` and `ffprobe` availability with `-version` at startup and before conversion.

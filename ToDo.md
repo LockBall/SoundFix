@@ -7,7 +7,7 @@
 - [x] Keep UI controls responsive while ffmpeg work is running.
 - [x] Add a progress bar so the GUI clearly indicates background work is active.
 - [x] Update progress text per file during batch conversion.
-- [x] Write success/failure conversion logs with settings and per-file commands.
+- [x] Write success/failure conversion logs with shared settings and per-file results.
 - [x] Validate generated output files before marking them successful.
 
 ## 2. Conversion Safety

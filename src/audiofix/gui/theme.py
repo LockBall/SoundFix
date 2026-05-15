@@ -1,3 +1,5 @@
+"""Tkinter theme definitions and style application for AudioFix."""
+
 from dataclasses import dataclass
 import tkinter as tk
 from tkinter import ttk

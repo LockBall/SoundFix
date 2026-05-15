@@ -1,3 +1,5 @@
+"""Output planning for file count, per-file gain, and numbered output paths."""
+
 from dataclasses import dataclass
 import math
 from pathlib import Path

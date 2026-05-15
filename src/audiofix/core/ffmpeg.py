@@ -1,3 +1,5 @@
+"""Low-level ffmpeg and ffprobe integration used by analysis and conversion."""
+
 from dataclasses import dataclass
 import json
 from pathlib import Path

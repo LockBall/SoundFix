@@ -5,7 +5,6 @@ in audiofix.core so the same behavior can later be reused by tests or a CLI.
 """
 
 import os
-import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, filedialog
@@ -42,28 +41,33 @@ from audiofix.core.config import (
     VORBIS_QUALITY_BITRATES,
     get_runtime_paths,
 )
+from audiofix.core.analysis import (
+    PeakAnalysisRequest,
+    PeakAnalysisResult,
+    analyze_peak as run_peak_analysis,
+)
+from audiofix.core.conversion import (
+    ConversionProgress,
+    ConversionRequest,
+    ConversionResult,
+    run_conversion_request,
+)
 from audiofix.core.ffmpeg import (
     FfmpegOptions,
     AudioInfo,
     ToolStatus,
     build_ffmpeg_command,
     check_ffmpeg_tools,
-    gain_to_peak_headroom_db,
-    measure_max_volume_db,
     probe_audio_info,
-    run_ffmpeg_command,
-    validate_output_file,
 )
 from audiofix.core.logging import (
-    ConversionLogItem,
     ConversionLogSettings,
-    write_conversion_log,
 )
 from audiofix.core.planning import (
-    OutputPlanItem,
     build_output_plan,
     calculate_step_count,
 )
+from audiofix.core.tasks import start_background_task
 from audiofix.gui.theme import DEFAULT_THEME, THEMES, apply_theme
 
 VORBIS_QUALITY_VALUES = [value / 2 for value in range(-2, 21)]
@@ -190,6 +194,9 @@ def main() -> None:
 
     def refresh_tool_status() -> None:
         update_tool_status()
+
+    def schedule_ui(callback) -> None:
+        root.after(0, callback)
 
     def format_audio_info(info: AudioInfo) -> str:
         bit_rate = f"{round(info.bit_rate / 1000)} kbps" if info.bit_rate else "unknown bitrate"
@@ -430,95 +437,37 @@ def main() -> None:
         peak_analysis_running[0] = True
         set_peak_analysis_controls_enabled(False)
         status_var.set("Analyzing peak...")
-
-        thread = threading.Thread(
-            target=run_peak_analysis_worker,
-            args=(source_path, headroom_db, encoder_mode),
-            daemon=True,
+        request = PeakAnalysisRequest(
+            source_path=source_path,
+            headroom_db=headroom_db,
+            encoder_mode=encoder_mode,
         )
-        thread.start()
-
-    def run_peak_analysis_worker(
-        source_path: Path,
-        headroom_db: float,
-        encoder_mode: str,
-    ) -> None:
-        tool_status: ToolStatus | None = None
-        try:
-            tool_status = check_ffmpeg_tools()
-            if not tool_status.ffmpeg.available or tool_status.ffmpeg.path is None:
-                raise RuntimeError("ffmpeg unavailable; cannot analyze peak.")
-            if not tool_status.ffprobe.available or tool_status.ffprobe.path is None:
-                raise RuntimeError("ffprobe unavailable; cannot read input audio settings.")
-
-            audio_info = probe_audio_info(tool_status.ffprobe.path, source_path)
-            if encoder_mode == ENCODER_MODE_BITRATE and audio_info.bit_rate is None:
-                raise RuntimeError("Input audio bitrate is unknown; cannot analyze peak with match-bitrate mode.")
-
-            max_volume_db = measure_max_volume_db(tool_status.ffmpeg.path, source_path)
-        except (RuntimeError, ValueError) as error:
-            error_message = str(error)
-            root.after(
-                0,
-                lambda error_message=error_message: finish_peak_analysis(
-                    source_path=source_path,
-                    headroom_db=headroom_db,
-                    encoder_mode=encoder_mode,
-                    tool_status=tool_status,
-                    audio_info=None,
-                    max_volume_db=None,
-                    error_message=error_message,
-                ),
-            )
-            return
-
-        root.after(
-            0,
-            lambda: finish_peak_analysis(
-                source_path=source_path,
-                headroom_db=headroom_db,
-                encoder_mode=encoder_mode,
-                tool_status=tool_status,
-                audio_info=audio_info,
-                max_volume_db=max_volume_db,
-                error_message=None,
-            ),
+        start_background_task(
+            work=lambda: run_peak_analysis(request),
+            on_success=finish_peak_analysis,
+            on_error=fail_peak_analysis,
+            schedule=schedule_ui,
         )
 
-    def finish_peak_analysis(
-        source_path: Path,
-        headroom_db: float,
-        encoder_mode: str,
-        tool_status: ToolStatus | None,
-        audio_info: AudioInfo | None,
-        max_volume_db: float | None,
-        error_message: str | None,
-    ) -> None:
+    def fail_peak_analysis(error: Exception) -> None:
         peak_analysis_running[0] = False
         set_peak_analysis_controls_enabled(True)
+        status_var.set(f"Peak analysis failed: {error}")
 
-        if tool_status is not None:
-            set_tool_status(tool_status)
-
-        if error_message is not None:
-            status_var.set(f"Peak analysis failed: {error_message}")
-            return
-
-        if audio_info is None or max_volume_db is None:
-            status_var.set("Peak analysis failed: no result returned.")
-            return
-
-        audio_info_var.set(format_audio_info(audio_info))
-        last_audio_info[0] = audio_info
-        calculated_gain_db = gain_to_peak_headroom_db(max_volume_db, headroom_db)
-        raw_peak_var.set(f"Raw peak: {format_db(max_volume_db, signed=True)} dB")
-        peak_target_db = -abs(headroom_db)
-        calculated_gain_db_var.set(format_db(calculated_gain_db))
+    def finish_peak_analysis(result: PeakAnalysisResult) -> None:
+        peak_analysis_running[0] = False
+        set_peak_analysis_controls_enabled(True)
+        set_tool_status(result.tool_status)
+        audio_info_var.set(format_audio_info(result.audio_info))
+        last_audio_info[0] = result.audio_info
+        raw_peak_var.set(f"Raw peak: {format_db(result.max_volume_db, signed=True)} dB")
+        peak_target_db = -abs(result.headroom_db)
+        calculated_gain_db_var.set(format_db(result.calculated_gain_db))
         status_var.set(
-            f"Peak analysis: source max {format_db(max_volume_db)} dB, "
+            f"Peak analysis: source max {format_db(result.max_volume_db)} dB, "
             f"target {format_db(peak_target_db)} dB, "
-            f"headroom {format_db(abs(headroom_db))} dB, "
-            f"raw plus headroom {format_db(calculated_gain_db)} dB."
+            f"headroom {format_db(abs(result.headroom_db))} dB, "
+            f"raw plus headroom {format_db(result.calculated_gain_db)} dB."
         )
         update_command_preview()
 
@@ -636,21 +585,31 @@ def main() -> None:
         progress_bar.configure(maximum=len(plan), value=0)
         set_conversion_controls_enabled(False)
         status_var.set(f"Starting conversion: 0 of {len(plan)} files.")
-
-        thread = threading.Thread(
-            target=run_conversion_worker,
-            args=(
-                tool_status.ffmpeg.path,
-                tool_status.ffprobe.path,
-                source_path,
-                output_dir,
-                plan,
-                options,
-                settings,
-            ),
-            daemon=True,
+        request = ConversionRequest(
+            ffmpeg_path=tool_status.ffmpeg.path,
+            ffprobe_path=tool_status.ffprobe.path,
+            source_path=source_path,
+            output_dir=output_dir,
+            plan=plan,
+            options=options,
+            settings=settings,
         )
-        thread.start()
+        start_background_task(
+            work=lambda: run_conversion_request(
+                request,
+                on_progress=lambda progress: schedule_ui(
+                    lambda progress=progress: update_conversion_progress(progress)
+                ),
+            ),
+            on_success=finish_conversion,
+            on_error=fail_conversion,
+            schedule=schedule_ui,
+        )
+
+    def fail_conversion(error: Exception) -> None:
+        conversion_running[0] = False
+        set_conversion_controls_enabled(True)
+        status_var.set(f"Conversion failed: {error}")
 
     def parse_raw_peak_display() -> float | None:
         prefix = "Raw peak:"
@@ -665,139 +624,28 @@ def main() -> None:
         except ValueError:
             return None
 
-    def display_command(command: list[str]) -> str:
-        display_parts = ["ffmpeg", *command[1:]]
-        return " ".join(f'"{part}"' if " " in part else part for part in display_parts)
-
-    def run_conversion_worker(
-        ffmpeg_path: Path,
-        ffprobe_path: Path,
-        source_path: Path,
-        output_dir: Path,
-        plan: list[OutputPlanItem],
-        options: FfmpegOptions,
-        settings: ConversionLogSettings,
-    ) -> None:
-        log_items: list[ConversionLogItem] = []
-        failure_message: str | None = None
-
-        for completed_count, item in enumerate(plan):
-            root.after(
-                0,
-                lambda completed_count=completed_count, item=item: update_conversion_progress(
-                    completed_count,
-                    len(plan),
-                    item.output_path.name,
-                ),
-            )
-            command = build_ffmpeg_command(
-                ffmpeg_path=ffmpeg_path,
-                source_path=source_path,
-                item=item,
-                options=options,
-            )
-            result = run_ffmpeg_command(command)
-            if result.returncode != 0:
-                error_text = result.stderr.strip() or result.stdout.strip() or "ffmpeg failed"
-                failure_message = f"{item.output_path.name}: {error_text}"
-                log_items.append(
-                    ConversionLogItem(
-                        plan_item=item,
-                        status="failed",
-                        message=error_text,
-                    )
-                )
-                break
-
-            try:
-                validate_output_file(ffprobe_path, item.output_path)
-            except (RuntimeError, ValueError) as error:
-                failure_message = f"{item.output_path.name}: {error}"
-                log_items.append(
-                    ConversionLogItem(
-                        plan_item=item,
-                        status="failed",
-                        message=str(error),
-                    )
-                )
-                break
-
-            log_items.append(
-                ConversionLogItem(
-                    plan_item=item,
-                    status="success",
-                    message="validated",
-                )
-            )
-            root.after(
-                0,
-                lambda completed_count=completed_count + 1: progress_var.set(completed_count),
-            )
-
-        success = failure_message is None and len(log_items) == len(plan)
-        log_path = output_dir / ("conversion_log.txt" if success else "conversion_failed_log.txt")
-        try:
-            write_conversion_log(
-                log_path=log_path,
-                settings=settings,
-                items=log_items,
-                success=success,
-                failure_message=failure_message,
-            )
-        except OSError as error:
-            if failure_message:
-                failure_message = f"{failure_message}; additionally failed to write log: {error}"
-            else:
-                failure_message = f"Generated files, but failed to write log: {error}"
-            success = False
-            log_path = output_dir / "conversion_failed_log.txt"
-            try:
-                write_conversion_log(
-                    log_path=log_path,
-                    settings=settings,
-                    items=log_items,
-                    success=False,
-                    failure_message=failure_message,
-                )
-            except OSError as failed_log_error:
-                failure_message = f"{failure_message}; failed to write failure log: {failed_log_error}"
-
-        root.after(
-            0,
-            lambda: finish_conversion(
-                output_dir=output_dir,
-                file_count=sum(1 for item in log_items if item.status == "success"),
-                total_count=len(plan),
-                success=success,
-                failure_message=failure_message,
-                log_path=log_path,
-            ),
+    def update_conversion_progress(progress: ConversionProgress) -> None:
+        progress_var.set(progress.completed_count)
+        status_var.set(
+            f"Converting {progress.completed_count + 1} of {progress.total_count}: {progress.filename}"
         )
 
-    def update_conversion_progress(completed_count: int, total_count: int, filename: str) -> None:
-        progress_var.set(completed_count)
-        status_var.set(f"Converting {completed_count + 1} of {total_count}: {filename}")
-
-    def finish_conversion(
-        output_dir: Path,
-        file_count: int,
-        total_count: int,
-        success: bool,
-        failure_message: str | None,
-        log_path: Path,
-    ) -> None:
+    def finish_conversion(result: ConversionResult) -> None:
         conversion_running[0] = False
         set_conversion_controls_enabled(True)
-        if success:
-            progress_var.set(total_count)
-            last_output_folder[0] = output_dir
+        if result.success:
+            progress_var.set(result.total_count)
+            last_output_folder[0] = result.output_dir
             open_output_button.state(["!disabled"])
-            status_var.set(f"Generated {total_count} files in {output_dir}. Log: {log_path.name}")
+            status_var.set(
+                f"Generated {result.total_count} files in {result.output_dir}. "
+                f"Log: {result.log_path.name}"
+            )
             return
 
         status_var.set(
-            f"Conversion failed after {file_count} of {total_count} files. "
-            f"Log: {log_path.name}. {failure_message or ''}".strip()
+            f"Conversion failed after {result.file_count} of {result.total_count} files. "
+            f"Log: {result.log_path.name}. {result.failure_message or ''}".strip()
         )
 
     ttk.Label(

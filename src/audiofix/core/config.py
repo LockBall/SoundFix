@@ -1,3 +1,5 @@
+"""Shared defaults, layout constants, encoder options, and runtime paths."""
+
 from dataclasses import dataclass
 from pathlib import Path
 

@@ -1,3 +1,5 @@
+"""Developer utility for installing Windows ffmpeg/ffprobe into vendor/ffmpeg."""
+
 from pathlib import Path
 import argparse
 import shutil

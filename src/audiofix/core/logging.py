@@ -1,3 +1,5 @@
+"""Conversion log formatting and writing for successful and failed runs."""
+
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -116,4 +118,3 @@ def _format_output_path(output_path: Path, output_dir: Path) -> str:
         return str(output_path.relative_to(output_dir))
     except ValueError:
         return output_path.name
-

@@ -1,3 +1,5 @@
+"""Focused tests for core planning, ffmpeg command construction, and services."""
+
 import sys
 import tempfile
 from pathlib import Path
@@ -14,6 +16,8 @@ from audiofix.core.planning import (
 )
 
 from audiofix.core.config import ENCODER_MODE_BITRATE, ENCODER_MODE_QUALITY
+from audiofix.core.analysis import PeakAnalysisRequest, analyze_peak
+from audiofix.core.conversion import ConversionRequest, run_conversion_request
 from audiofix.core.ffmpeg import (
     AudioInfo,
     BinaryStatus,
@@ -31,6 +35,7 @@ from audiofix.core.logging import (
     ConversionLogSettings,
     build_conversion_log_lines,
 )
+from audiofix.core.tasks import start_background_task
 
 
 class BuildOutputPlanTests(unittest.TestCase):
@@ -328,6 +333,106 @@ class ConversionLogTests(unittest.TestCase):
         self.assertIn("index\toutput_file\tgain_db\tstatus\tmessage", log_text)
         self.assertIn("0\tsource_0.ogg\t-1.500\tfailed\tffmpeg failed", log_text)
         self.assertNotIn("out/source_0.ogg", log_text)
+
+
+class PeakAnalysisServiceTests(unittest.TestCase):
+    def test_analyzes_peak_from_core_service(self) -> None:
+        status = mock.Mock()
+        status.ffmpeg.available = True
+        status.ffmpeg.path = Path("ffmpeg")
+        status.ffprobe.available = True
+        status.ffprobe.path = Path("ffprobe")
+        audio_info = AudioInfo(
+            codec_name="vorbis",
+            bit_rate=160000,
+            sample_rate=44100,
+            channels=2,
+        )
+
+        with (
+            mock.patch("audiofix.core.analysis.check_ffmpeg_tools", return_value=status),
+            mock.patch("audiofix.core.analysis.probe_audio_info", return_value=audio_info),
+            mock.patch("audiofix.core.analysis.measure_max_volume_db", return_value=0.813),
+        ):
+            result = analyze_peak(
+                PeakAnalysisRequest(
+                    source_path=Path("source.ogg"),
+                    headroom_db=0.5,
+                    encoder_mode=ENCODER_MODE_QUALITY,
+                )
+            )
+
+        self.assertEqual(result.audio_info, audio_info)
+        self.assertEqual(result.max_volume_db, 0.813)
+        self.assertAlmostEqual(result.calculated_gain_db, -1.313)
+
+
+class ConversionServiceTests(unittest.TestCase):
+    def test_runs_conversion_and_writes_success_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            plan = build_output_plan(
+                source_path=Path("source.ogg"),
+                output_dir=output_dir,
+                db_offset=-1.5,
+                step_count=1,
+                interval_db=-3.0,
+            )
+            settings = ConversionLogSettings(
+                source_path=Path("source.ogg"),
+                output_dir=output_dir,
+                max_db=0.0,
+                min_db=-60.0,
+                interval_db=3.0,
+                raw_peak_db=1.0,
+                headroom_db=0.5,
+                calculated_gain_db=-1.5,
+                encoder_mode="Vorbis Quality",
+                vorbis_quality=5.0,
+                overwrite=True,
+            )
+            completed = mock.Mock(returncode=0, stdout="", stderr="")
+            progress_updates = []
+
+            with (
+                mock.patch("audiofix.core.conversion.run_ffmpeg_command", return_value=completed),
+                mock.patch("audiofix.core.conversion.validate_output_file"),
+            ):
+                result = run_conversion_request(
+                    ConversionRequest(
+                        ffmpeg_path=Path("ffmpeg"),
+                        ffprobe_path=Path("ffprobe"),
+                        source_path=Path("source.ogg"),
+                        output_dir=output_dir,
+                        plan=plan,
+                        options=FfmpegOptions(overwrite=True),
+                        settings=settings,
+                    ),
+                    on_progress=progress_updates.append,
+                )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.file_count, 1)
+        self.assertEqual(progress_updates[0].filename, plan[0].output_path.name)
+        self.assertEqual(result.log_path.name, "conversion_log.txt")
+
+
+class BackgroundTaskTests(unittest.TestCase):
+    def test_background_task_schedules_success_callback(self) -> None:
+        callbacks = []
+        results = []
+
+        thread = start_background_task(
+            work=lambda: "done",
+            on_success=results.append,
+            on_error=lambda error: self.fail(str(error)),
+            schedule=callbacks.append,
+        )
+        thread.join(timeout=5)
+
+        self.assertEqual(len(callbacks), 1)
+        callbacks[0]()
+        self.assertEqual(results, ["done"])
 
 
 if __name__ == "__main__":
