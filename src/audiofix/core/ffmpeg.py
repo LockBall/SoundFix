@@ -4,8 +4,9 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 
-from audiofix.core.config import get_runtime_paths
+from audiofix.core.config import ENCODER_MODE_BITRATE, get_runtime_paths
 from audiofix.core.planning import OutputPlanItem
 
 
@@ -14,6 +15,8 @@ class FfmpegOptions:
     audio_bitrate: str | None = None
     sample_rate: int | None = None
     channels: int | None = None
+    encoder_mode: str = ENCODER_MODE_BITRATE
+    vorbis_quality: float | None = None
     overwrite: bool = False
 
 
@@ -23,6 +26,14 @@ class AudioInfo:
     bit_rate: int | None
     sample_rate: int | None
     channels: int | None
+
+
+@dataclass(frozen=True)
+class PeakRefinementPass:
+    pass_number: int
+    gain_db: float
+    encoded_peak_db: float
+    error_db: float
 
 
 @dataclass(frozen=True)
@@ -208,6 +219,82 @@ def gain_to_peak_margin_db(max_volume_db: float, peak_margin_db: float) -> float
     return -max_volume_db - abs(peak_margin_db)
 
 
+def scale_gain_db(gain_db: float, scale: float) -> float:
+    return gain_db * scale
+
+
+def refine_gain_for_encoded_peak(
+    ffmpeg_path: Path,
+    source_path: Path,
+    initial_gain_db: float,
+    peak_target_db: float,
+    options: FfmpegOptions,
+    iterations: int = 4,
+) -> tuple[float, float]:
+    gain_db, encoded_peak_db, _history = refine_gain_for_encoded_peak_with_history(
+        ffmpeg_path=ffmpeg_path,
+        source_path=source_path,
+        initial_gain_db=initial_gain_db,
+        peak_target_db=peak_target_db,
+        options=options,
+        iterations=iterations,
+    )
+    return gain_db, encoded_peak_db
+
+
+def refine_gain_for_encoded_peak_with_history(
+    ffmpeg_path: Path,
+    source_path: Path,
+    initial_gain_db: float,
+    peak_target_db: float,
+    options: FfmpegOptions,
+    iterations: int = 4,
+) -> tuple[float, float, list[PeakRefinementPass]]:
+    if iterations < 1:
+        raise ValueError("iterations must be at least 1")
+
+    gain_db = initial_gain_db
+    encoded_peak_db = 0.0
+    history: list[PeakRefinementPass] = []
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir)
+        for index in range(iterations):
+            temp_output = temp_root / f"peak_refine_{index}.ogg"
+            item = OutputPlanItem(index=index, gain_db=gain_db, output_path=temp_output)
+            result = convert_plan_item(
+                ffmpeg_path=ffmpeg_path,
+                source_path=source_path,
+                item=item,
+                options=FfmpegOptions(
+                    audio_bitrate=options.audio_bitrate,
+                    sample_rate=options.sample_rate,
+                    channels=options.channels,
+                    encoder_mode=options.encoder_mode,
+                    vorbis_quality=options.vorbis_quality,
+                    overwrite=True,
+                ),
+            )
+            if result.returncode != 0:
+                error_text = result.stderr.strip() or result.stdout.strip()
+                raise RuntimeError(error_text or "ffmpeg peak refinement failed")
+
+            encoded_peak_db = measure_max_volume_db(ffmpeg_path, temp_output)
+            error_db = encoded_peak_db - peak_target_db
+            history.append(
+                PeakRefinementPass(
+                    pass_number=index + 1,
+                    gain_db=gain_db,
+                    encoded_peak_db=encoded_peak_db,
+                    error_db=error_db,
+                )
+            )
+            if index < iterations - 1:
+                gain_db -= error_db
+
+    return gain_db, encoded_peak_db, history
+
+
 def _parse_optional_int(value: object) -> int | None:
     if value in (None, "N/A"):
         return None
@@ -236,8 +323,10 @@ def build_ffmpeg_command(
         "-c:a",
         "libvorbis",
     ]
-    if options.audio_bitrate:
+    if options.encoder_mode == ENCODER_MODE_BITRATE and options.audio_bitrate:
         command.extend(["-b:a", options.audio_bitrate])
+    if options.encoder_mode != ENCODER_MODE_BITRATE and options.vorbis_quality is not None:
+        command.extend(["-q:a", str(options.vorbis_quality)])
     if options.sample_rate:
         command.extend(["-ar", str(options.sample_rate)])
     if options.channels:

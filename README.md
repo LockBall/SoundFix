@@ -31,10 +31,12 @@ Generate multiple quieter versions of an audio file for game audio tuning.
   - initial dB gain measured externally for the selected input file
   - peak margin dB for optional peak analysis
   - dB interval between files
+  - Ogg Vorbis encoder mode: match source bitrate or choose a Vorbis quality level
   - overwrite behavior
   - output folder
 - Optional analysis:
-  - peak analysis can fill initial dB from ffmpeg `astats` so the source peak reaches the requested peak margin.
+  - peak analysis can fill initial dB from ffmpeg `astats` and refine through a temporary Ogg encode so the encoded output peak lands closer to the requested margin.
+  - peak scale can adjust the refined result before it is used as Initial dB; `1.00` uses the refined value directly, while `0.95` uses 95% of that dB value.
 - Displayed input metadata:
   - codec
   - bitrate
@@ -44,7 +46,7 @@ Generate multiple quieter versions of an audio file for game audio tuning.
   - number of output files / steps
 - Output files use unique numbered names: `filename_0.ogg`, `filename_1.ogg`, `filename_2.ogg`, etc.
 - Each run writes a log file as a reference for the dB levels used.
-- Conversion applies the user-entered initial dB value with ffmpeg's `volume` filter, applies later dB step reductions with `volume`, reuses detected source bitrate/sample rate/channel count, and exports Ogg Vorbis files.
+- Conversion applies the user-entered initial dB value with ffmpeg's `volume` filter, applies later dB step reductions with `volume`, reuses detected source sample rate/channel count, and exports Ogg Vorbis files. The default encoder mode matches the detected source bitrate; quality mode uses ffmpeg `-q:a`.
 
 ## Project Structure
 - `src/audiofix/gui/`: Tkinter interface.
@@ -78,7 +80,8 @@ A microphone converts sound into audio, and a speaker converts audio into sound.
 ## Levels
 - Use the minimum dB range and dB interval to calculate output count.
 - Use the user-entered initial dB value as the first output gain, then apply dB interval reductions for later outputs.
-- The initial dB value can also be calculated from peak analysis as `0 - overall peak dB - peak margin dB`; a margin of `9.00` targets a `-9.00 dB` peak.
+- The initial dB value can also be calculated from peak analysis as `0 - overall peak dB - peak margin dB`, then refined against a temporary encoded output; a margin of `9.00` targets a `-9.00 dB` peak.
+- Temporary files created during peak refinement are used only for measurement and are discarded automatically. Final outputs are always encoded from the original input file, not from the temporary files.
 - Most WoW sound files appear to be volume maximized already, so the initial workflow assumes the source is loud enough and generates quieter variants.
 - Automatic LUFS normalization and perceived-loudness analysis are out of scope for the first version.
 

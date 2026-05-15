@@ -15,7 +15,8 @@ Shared memory for coding agents. Keep this file concise and durable: architectur
 - The user controls the minimum dB range and dB interval; AudioFix calculates the number of output files / steps.
 - The initial dB value is user-entered per input file and is the gain for file `_0`; later files apply additional dB interval reductions.
 - To mimic the GoldWave workflow, use the manually determined dB value directly with ffmpeg's plain `volume` filter. Do not run automatic LUFS normalization or clipping management in AudioFix for the MVP.
-- Optional peak analysis uses ffmpeg `astats` overall `Peak level dB` to fill initial dB as `0 - peak dB - peak margin dB`; margin is positive headroom below 0 dB, so `9.00` targets a `-9.00 dB` peak. This matches GoldWave peak amplitude dB more closely than `volumedetect`.
+- Optional peak analysis uses ffmpeg `astats` overall `Peak level dB` to fill initial dB as `0 - peak dB - peak margin dB`, then refines through temporary Ogg encodes to compensate for Vorbis peak changes. Margin is positive headroom below 0 dB, so `9.00` targets a `-9.00 dB` peak.
+- Peak scale adjusts the refined dB value before it is written to Initial dB; default `1.00` uses the refined result, `0.95` uses 95% of the refined dB value.
 - Source audio metadata is displayed after input selection. User-facing builds should reuse source audio settings where possible instead of exposing codec/bitrate as creative options.
 - ffmpeg options currently exposed in the GUI: overwrite existing files.
 - Output files must have unique numbered names: `filename_0.ogg`, `filename_1.ogg`, `filename_2.ogg`, etc.

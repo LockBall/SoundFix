@@ -60,6 +60,11 @@ def apply_theme(root: tk.Tk, theme_name: str) -> Theme:
         foreground=theme.muted_foreground,
     )
     style.configure(
+        "SelectedScale.TLabel",
+        background=theme.accent,
+        foreground=theme.selection_foreground,
+    )
+    style.configure(
         "Status.TLabel",
         background=theme.field_background,
         foreground=theme.foreground,

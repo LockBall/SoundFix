@@ -13,6 +13,7 @@ from audiofix.core.planning import (
     calculate_step_count,
 )
 
+from audiofix.core.config import ENCODER_MODE_QUALITY
 from audiofix.core.ffmpeg import (
     BinaryStatus,
     FfmpegOptions,
@@ -22,6 +23,9 @@ from audiofix.core.ffmpeg import (
     convert_plan_item,
     gain_to_peak_margin_db,
     measure_max_volume_db,
+    refine_gain_for_encoded_peak,
+    refine_gain_for_encoded_peak_with_history,
+    scale_gain_db,
 )
 
 
@@ -91,6 +95,57 @@ class FfmpegCommandTests(unittest.TestCase):
         self.assertEqual(gain_to_peak_margin_db(0.813331, 0.0), -0.813331)
         self.assertEqual(gain_to_peak_margin_db(0.813331, 0.2), -1.013331)
         self.assertEqual(gain_to_peak_margin_db(0.813331, 9.0), -9.813331)
+
+    def test_scales_refined_gain(self) -> None:
+        self.assertEqual(scale_gain_db(-1.4, 1.0), -1.4)
+        self.assertEqual(scale_gain_db(-1.4, 0.95), -1.3299999999999998)
+
+    def test_refines_gain_against_encoded_peak(self) -> None:
+        completed = mock.Mock()
+        completed.returncode = 0
+        completed.stdout = ""
+        completed.stderr = ""
+
+        with (
+            mock.patch("audiofix.core.ffmpeg.convert_plan_item", return_value=completed),
+            mock.patch("audiofix.core.ffmpeg.measure_max_volume_db", side_effect=[0.15, 0.01]),
+        ):
+            gain_db, encoded_peak_db = refine_gain_for_encoded_peak(
+                ffmpeg_path=Path("ffmpeg"),
+                source_path=Path("source.ogg"),
+                initial_gain_db=-0.81,
+                peak_target_db=0.0,
+                options=FfmpegOptions(audio_bitrate="112000", sample_rate=44100, channels=2),
+                iterations=2,
+            )
+
+        self.assertAlmostEqual(gain_db, -0.96)
+        self.assertEqual(encoded_peak_db, 0.01)
+
+    def test_refines_gain_with_measured_pass_history(self) -> None:
+        completed = mock.Mock()
+        completed.returncode = 0
+        completed.stdout = ""
+        completed.stderr = ""
+
+        with (
+            mock.patch("audiofix.core.ffmpeg.convert_plan_item", return_value=completed),
+            mock.patch("audiofix.core.ffmpeg.measure_max_volume_db", side_effect=[0.15, 0.01]),
+        ):
+            gain_db, encoded_peak_db, history = refine_gain_for_encoded_peak_with_history(
+                ffmpeg_path=Path("ffmpeg"),
+                source_path=Path("source.ogg"),
+                initial_gain_db=-0.81,
+                peak_target_db=0.0,
+                options=FfmpegOptions(audio_bitrate="112000", sample_rate=44100, channels=2),
+                iterations=2,
+            )
+
+        self.assertAlmostEqual(gain_db, -0.96)
+        self.assertEqual(encoded_peak_db, 0.01)
+        self.assertEqual([result.pass_number for result in history], [1, 2])
+        self.assertEqual([result.encoded_peak_db for result in history], [0.15, 0.01])
+        self.assertEqual([result.error_db for result in history], [0.15, 0.01])
 
     def test_builds_goldwave_style_volume_filter_from_initial_db(self) -> None:
         plan = build_output_plan(
@@ -193,6 +248,31 @@ class FfmpegCommandTests(unittest.TestCase):
             options=FfmpegOptions(audio_bitrate=None, overwrite=False),
         )
 
+        self.assertNotIn("-b:a", command)
+
+    def test_builds_vorbis_quality_command(self) -> None:
+        plan = build_output_plan(
+            source_path=Path("source.ogg"),
+            output_dir=Path("out"),
+            db_offset=-12.39,
+            step_count=1,
+            db_interval=-3.0,
+        )
+
+        command = build_ffmpeg_command(
+            ffmpeg_path=Path("ffmpeg"),
+            source_path=Path("source.ogg"),
+            item=plan[0],
+            options=FfmpegOptions(
+                audio_bitrate="160k",
+                encoder_mode=ENCODER_MODE_QUALITY,
+                vorbis_quality=5,
+                overwrite=True,
+            ),
+        )
+
+        self.assertIn("-q:a", command)
+        self.assertIn("5", command)
         self.assertNotIn("-b:a", command)
 
     def test_convert_plan_item_uses_built_command(self) -> None:
