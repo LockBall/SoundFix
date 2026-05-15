@@ -16,9 +16,8 @@ Generate multiple quieter versions of an audio file for game audio tuning.
 
 ## Purpose
 - Take one source audio file and export multiple files with different volume reductions.
-- Support manual analysis: the user enters the initial dB gain value determined in GoldWave or another tool.
-- Let the user choose the minimum dB range and dB interval between outputs; AudioFix calculates the number of output files.
-- Generate a log file that records the source file, output files, and dB levels used.
+- Support peak analysis: AudioFix measures the source peak with ffmpeg and calculates the first gain value from raw peak plus headroom.
+- Let the user choose the minimum dB range and interval dB between outputs; AudioFix calculates the number of output files.
 
 ## Design
 - WoW's files are Ogg Vorbis, so the initial target output format is Ogg Vorbis.
@@ -28,14 +27,15 @@ Generate multiple quieter versions of an audio file for game audio tuning.
 - Prefer bundled `ffmpeg` and `ffprobe` binaries under `vendor/ffmpeg` so users do not need to install them manually.
 - User-entered parameters:
   - minimum dB range
-  - initial dB gain measured externally for the selected input file
-  - peak headroom dB for optional peak analysis
-  - dB interval between files
+  - headroom dB for peak analysis
+  - interval dB between files
+  - raw plus headroom dB, calculated from analysis and still editable
   - Ogg Vorbis encoder mode: match source bitrate or choose a Vorbis quality level
   - overwrite behavior
   - output folder
-- Optional analysis:
-  - peak analysis can fill initial dB from ffmpeg `astats` using the configured headroom below 0 dB.
+- Peak analysis:
+  - ffmpeg `astats` reads the overall source peak.
+  - AudioFix calculates `-1 * (raw peak dB + headroom dB)` for file `_0`.
 - Displayed input metadata:
   - codec
   - bitrate
@@ -44,12 +44,11 @@ Generate multiple quieter versions of an audio file for game audio tuning.
 - Calculated parameters:
   - number of output files / steps
 - Output files use unique numbered names: `filename_0.ogg`, `filename_1.ogg`, `filename_2.ogg`, etc.
-- Each run writes a log file as a reference for the dB levels used.
-- Conversion applies the user-entered initial dB value with ffmpeg's `volume` filter, applies later dB step reductions with `volume`, reuses detected source sample rate/channel count, and exports Ogg Vorbis files. The default encoder mode matches the detected source bitrate; quality mode uses ffmpeg `-q:a`.
+- Conversion applies the calculated gain with ffmpeg's `volume` filter, applies later interval reductions with `volume`, reuses detected source sample rate/channel count, and exports Ogg Vorbis files. The default encoder mode uses Vorbis quality; match-source-bitrate mode uses the detected input bitrate when available.
 
 ## Project Structure
 - `src/audiofix/gui/`: Tkinter interface.
-- `src/audiofix/core/`: conversion planning, naming, ffmpeg command generation, and logging logic.
+- `src/audiofix/core/`: conversion planning, naming, ffmpeg command generation, and configuration.
 - `vendor/ffmpeg/`: bundled ffmpeg/ffprobe resources.
 - `tools/`: maintenance scripts for bundled resources and release prep.
 - `docs/`: project notes that are more detailed than the README.
@@ -64,7 +63,7 @@ python run_gui.py
 
 ## MVP Scope
 - Batch loudness conversion first.
-- The user handles audio analysis manually for now.
+- The app handles simple peak analysis with ffmpeg.
 - The app applies deterministic dB gain changes and exports numbered files.
 - Advanced restoration, clipping repair, compression repair, and generative audio features are future ideas tracked in `docs/ideas.md`.
 
@@ -77,10 +76,10 @@ Audio (data) or (physical) Sound ?
 A microphone converts sound into audio, and a speaker converts audio into sound.
 
 ## Levels
-- Use the minimum dB range and dB interval to calculate output count.
-- Use the user-entered initial dB value as the first output gain, then apply dB interval reductions for later outputs.
-- The initial dB value can also be calculated from peak analysis as `0 - overall peak dB - headroom dB`.
-- Most WoW sound files appear to be volume maximized already, so the initial workflow assumes the source is loud enough and generates quieter variants.
+- Use the minimum dB range and interval dB to calculate output count.
+- Use the calculated raw-plus-headroom value as the first output gain, then apply interval reductions for later outputs.
+- The first gain value is calculated as `-1 * (overall peak dB + headroom dB)`.
+- Most WoW sound files appear to be volume maximized already, so the current workflow assumes the source is loud enough and generates quieter variants.
 - Automatic LUFS normalization and perceived-loudness analysis are out of scope for the first version.
 
 ## Tools

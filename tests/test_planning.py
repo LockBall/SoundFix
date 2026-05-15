@@ -13,7 +13,7 @@ from audiofix.core.planning import (
     calculate_step_count,
 )
 
-from audiofix.core.config import ENCODER_MODE_QUALITY
+from audiofix.core.config import ENCODER_MODE_BITRATE, ENCODER_MODE_QUALITY
 from audiofix.core.ffmpeg import (
     BinaryStatus,
     FfmpegOptions,
@@ -92,7 +92,7 @@ class FfmpegCommandTests(unittest.TestCase):
     def test_calculates_gain_to_peak_headroom(self) -> None:
         self.assertAlmostEqual(gain_to_peak_headroom_db(0.813331, 0.05), -0.863331)
 
-    def test_builds_goldwave_style_volume_filter_from_initial_db(self) -> None:
+    def test_builds_volume_filter_from_gain_db(self) -> None:
         plan = build_output_plan(
             source_path=Path("source.ogg"),
             output_dir=Path("out"),
@@ -101,7 +101,7 @@ class FfmpegCommandTests(unittest.TestCase):
             interval_db=-3.0,
         )
 
-        audio_filter = build_audio_filter(plan[0], FfmpegOptions())
+        audio_filter = build_audio_filter(plan[0])
 
         self.assertEqual(audio_filter, "volume=-12.39dB")
 
@@ -150,6 +150,7 @@ class FfmpegCommandTests(unittest.TestCase):
             item=plan[0],
             options=FfmpegOptions(
                 audio_bitrate="160k",
+                encoder_mode=ENCODER_MODE_BITRATE,
                 sample_rate=44100,
                 channels=2,
                 overwrite=True,

@@ -12,14 +12,15 @@ from tkinter import ttk
 
 from audiofix import __version__
 from audiofix.core.config import (
+    APP_NAME,
     APP_ROW_GAP_PX,
     CONTROL_TITLE_GAP_PX,
     COMPACT_SECTION_ROW_GAP_PX,
     DB_DISPLAY_DECIMALS,
     DB_FIELD_WIDTH_CHARS,
+    DEFAULT_CALCULATED_GAIN_DB_TEXT,
     DEFAULT_INTERVAL_DB,
     DEFAULT_ENCODER_MODE,
-    DEFAULT_INITIAL_GAIN_DB_TEXT,
     DEFAULT_MAX_DB,
     DEFAULT_MIN_DB,
     DEFAULT_PEAK_HEADROOM_DB,
@@ -90,11 +91,11 @@ def build_menu(root: tk.Tk, theme_var: tk.StringVar) -> tk.Menu:
 
     help_menu = tk.Menu(menu_bar, tearoff=False)
     help_menu.add_command(
-        label="About AudioFix",
+        label=f"About {APP_NAME}",
         command=lambda: messagebox.showinfo(
-            title="About AudioFix",
+            title=f"About {APP_NAME}",
             message=(
-                f"AudioFix {__version__}\n\n"
+                f"{APP_NAME} {__version__}\n\n"
                 "Batch loudness converter for generating quieter game audio variants."
             ),
         ),
@@ -106,7 +107,7 @@ def build_menu(root: tk.Tk, theme_var: tk.StringVar) -> tk.Menu:
 
 def main() -> None:
     root = tk.Tk()
-    root.title("AudioFix")
+    root.title(APP_NAME)
     root.geometry(f"{DEFAULT_WINDOW_WIDTH}x{DEFAULT_WINDOW_HEIGHT}")
     root.minsize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
     apply_theme(root, DEFAULT_THEME)
@@ -139,7 +140,7 @@ def main() -> None:
     file_path_var = tk.StringVar(value="")
     max_db_var = tk.StringVar(value="")
     min_db_var = tk.StringVar(value="")
-    initial_gain_db_var = tk.StringVar(value=DEFAULT_INITIAL_GAIN_DB_TEXT)
+    calculated_gain_db_var = tk.StringVar(value=DEFAULT_CALCULATED_GAIN_DB_TEXT)
     interval_db_var = tk.StringVar(value="")
     peak_headroom_db_var = tk.StringVar(value="")
     step_count_var = tk.StringVar(value="")
@@ -250,9 +251,9 @@ def main() -> None:
             return
 
         try:
-            initial_gain_db = float(initial_gain_db_var.get())
+            calculated_gain_db = float(calculated_gain_db_var.get())
         except ValueError:
-            command_preview_var.set("ffmpeg command preview unavailable: enter calculated peak gain.")
+            command_preview_var.set("ffmpeg command preview unavailable: enter raw plus headroom dB.")
             return
 
         try:
@@ -266,7 +267,7 @@ def main() -> None:
         plan = build_output_plan(
             source_path=source_path,
             output_dir=output_dir,
-            db_offset=initial_gain_db,
+            db_offset=calculated_gain_db,
             step_count=1,
             interval_db=-abs(interval_db),
         )
@@ -335,7 +336,7 @@ def main() -> None:
         if not peak_headroom_db_var.get().strip():
             peak_headroom_db_var.set(format_db(DEFAULT_PEAK_HEADROOM_DB))
         format_decimal_var(peak_headroom_db_var)
-        reset_peak_analysis("Headroom changed. Click Analyze peak to recalculate peak gain.")
+        reset_peak_analysis("Headroom changed. Click Analyze peak to recalculate raw plus headroom dB.")
 
     def browse_file() -> None:
         path = filedialog.askopenfilename(
@@ -401,15 +402,15 @@ def main() -> None:
             status_var.set(f"Peak analysis failed: {error}")
             return
 
-        initial_gain_db = gain_to_peak_headroom_db(max_volume_db, headroom_db)
+        calculated_gain_db = gain_to_peak_headroom_db(max_volume_db, headroom_db)
         raw_peak_var.set(f"Raw peak: {format_db(max_volume_db, signed=True)} dB")
         peak_target_db = -abs(headroom_db)
-        initial_gain_db_var.set(format_db(initial_gain_db))
+        calculated_gain_db_var.set(format_db(calculated_gain_db))
         status_var.set(
             f"Peak analysis: source max {format_db(max_volume_db)} dB, "
             f"target {format_db(peak_target_db)} dB, "
             f"headroom {format_db(abs(headroom_db))} dB, "
-            f"initial {format_db(initial_gain_db)} dB."
+            f"raw plus headroom {format_db(calculated_gain_db)} dB."
         )
         update_command_preview()
 
@@ -444,9 +445,9 @@ def main() -> None:
             return
 
         try:
-            initial_gain_db = float(initial_gain_db_var.get())
+            calculated_gain_db = float(calculated_gain_db_var.get())
         except ValueError:
-            status_var.set("Analyze peak or enter the calculated peak gain.")
+            status_var.set("Analyze peak or enter raw plus headroom dB.")
             return
 
         if not source_text:
@@ -482,7 +483,7 @@ def main() -> None:
         plan = build_output_plan(
             source_path=source_path,
             output_dir=output_dir,
-            db_offset=initial_gain_db,
+            db_offset=calculated_gain_db,
             step_count=step_count,
             interval_db=-abs(interval_db),
         )
@@ -549,8 +550,7 @@ def main() -> None:
         sticky="ew",
         padx=(FIELD_PAD_X_PX, FIELD_PAD_X_PX),
     )
-    browse_btn = ttk.Button(input_frame, text="Browse...", command=browse_file)
-    browse_btn.grid(row=0, column=2, sticky="e")
+    ttk.Button(input_frame, text="Browse...", command=browse_file).grid(row=0, column=2, sticky="e")
     input_meta_frame = ttk.Frame(input_frame)
     input_meta_frame.grid(
         row=1,
@@ -631,7 +631,7 @@ def main() -> None:
     add_db_entry(
         settings_frame,
         "- (Raw + Head) dB",
-        initial_gain_db_var,
+        calculated_gain_db_var,
         row=0,
         column=3,
         label_width=CALCULATED_GAIN_LABEL_WIDTH_CHARS,
@@ -645,7 +645,7 @@ def main() -> None:
     min_db_var.trace_add("write", update_step_count)
     interval_db_var.trace_add("write", update_step_count)
     interval_db_var.trace_add("write", update_command_preview)
-    initial_gain_db_var.trace_add("write", update_command_preview)
+    calculated_gain_db_var.trace_add("write", update_command_preview)
     overwrite_var.trace_add("write", update_command_preview)
     encoder_mode_choice_var.trace_add("write", update_command_preview)
     vorbis_quality_var.trace_add("write", update_vorbis_quality_markers)

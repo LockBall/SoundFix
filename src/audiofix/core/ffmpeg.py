@@ -5,7 +5,7 @@ import re
 import shutil
 import subprocess
 
-from audiofix.core.config import ENCODER_MODE_BITRATE, get_runtime_paths
+from audiofix.core.config import DEFAULT_ENCODER_MODE, ENCODER_MODE_BITRATE, get_runtime_paths
 from audiofix.core.planning import OutputPlanItem
 
 ASTATS_OVERALL_RE = re.compile(r"\bOverall\b")
@@ -18,7 +18,7 @@ class FfmpegOptions:
     audio_bitrate: str | None = None
     sample_rate: int | None = None
     channels: int | None = None
-    encoder_mode: str = ENCODER_MODE_BITRATE
+    encoder_mode: str = DEFAULT_ENCODER_MODE
     vorbis_quality: float | None = None
     overwrite: bool = False
 
@@ -90,19 +90,6 @@ def _find_binary_with_source(name: str, project_root: Path | None = None) -> tup
         return Path(system_binary), "PATH"
 
     return None, "missing"
-
-
-def _find_binary(name: str, project_root: Path | None = None) -> Path | None:
-    path, _source = _find_binary_with_source(name, project_root)
-    return path
-
-
-def find_ffmpeg(project_root: Path | None = None) -> Path | None:
-    return _find_binary("ffmpeg", project_root)
-
-
-def find_ffprobe(project_root: Path | None = None) -> Path | None:
-    return _find_binary("ffprobe", project_root)
 
 
 def check_ffmpeg_tools(project_root: Path | None = None) -> ToolStatus:
@@ -247,7 +234,6 @@ def build_ffmpeg_command(
     options: FfmpegOptions,
 ) -> list[str]:
     overwrite_flag = "-y" if options.overwrite else "-n"
-    filters = [build_audio_filter(item, options)]
 
     command = [
         str(ffmpeg_path),
@@ -255,7 +241,7 @@ def build_ffmpeg_command(
         "-i",
         str(source_path),
         "-filter:a",
-        ",".join(filters),
+        build_audio_filter(item),
         "-c:a",
         "libvorbis",
     ]
@@ -271,7 +257,7 @@ def build_ffmpeg_command(
     return command
 
 
-def build_audio_filter(item: OutputPlanItem, options: FfmpegOptions) -> str:
+def build_audio_filter(item: OutputPlanItem) -> str:
     return f"volume={item.gain_db:g}dB"
 
 
