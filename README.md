@@ -1,110 +1,125 @@
 # AudioFix
-Generate multiple quieter versions of an audio file for game audio tuning.
 
-## Table of Contents
-
-- [Purpose](#purpose)
-- [Design](#design)
-- [Project Structure](#project-structure)
-- [Run the GUI](#run-the-gui)
-- [MVP Scope](#mvp-scope)
-- [Example](#example)
-- [Words are Words](#words-are-words)
-- [Levels](#levels)
-- [Tools](#tools)
-- [Vendor Resources](#vendor-resources)
+Generate quieter Ogg Vorbis variants from one source audio file for game audio
+tuning.
 
 ## Purpose
-- Take one source audio file and export multiple files with different volume reductions.
-- Support peak analysis: AudioFix measures the source peak with ffmpeg and calculates the first gain value from raw peak plus headroom.
-- Let the user choose the minimum dB range and interval dB between outputs; AudioFix calculates the number of output files.
-- Write a success or failure log that records the shared settings plus per-file gain and validation status.
 
-## Design
-- WoW's files are Ogg Vorbis, so the initial target output format is Ogg Vorbis.
-- Use a Python Tkinter GUI frontend to control ffmpeg.
-- Provide basic dependency-free light and dark GUI themes.
-- Keep the first version free of third-party Python runtime dependencies.
-- Prefer bundled `ffmpeg` and `ffprobe` binaries under `vendor/ffmpeg` so users do not need to install them manually.
-- User-entered parameters:
-  - minimum dB range
-  - headroom dB for peak analysis
-  - interval dB between files
-  - raw plus headroom dB, calculated from analysis and still editable
-  - Ogg Vorbis encoder mode: match source bitrate or choose a Vorbis quality level
-  - overwrite behavior
-  - output folder
-- Peak analysis:
-  - ffmpeg `astats` reads the overall source peak.
-  - AudioFix calculates `-1 * (raw peak dB + headroom dB)` for file `_0`.
-- Displayed input metadata:
-  - codec
-  - bitrate
-  - sample rate
-  - channel count
-- Calculated parameters:
-  - number of output files / steps
-- Output files use unique numbered names: `filename_0.ogg`, `filename_1.ogg`, `filename_2.ogg`, etc.
-- Conversion applies the calculated gain with ffmpeg's `volume` filter, applies later interval reductions with `volume`, reuses detected source sample rate/channel count, and exports Ogg Vorbis files. The default encoder mode uses Vorbis quality; match-source-bitrate mode uses the detected input bitrate when available.
-- Successful runs write `conversion_log.txt`; failed runs write `conversion_failed_log.txt`.
+AudioFix is a small Tkinter utility for batch volume reduction. It analyzes the
+source peak with FFmpeg, calculates a safe loudest output gain, then exports a
+numbered set of quieter files.
 
-## Project Structure
-- `src/audiofix/gui/`: Tkinter interface.
-- `src/audiofix/core/`: conversion planning, naming, ffmpeg command generation, conversion logging, and configuration.
-- `vendor/ffmpeg/`: bundled ffmpeg/ffprobe resources.
-- `tools/`: maintenance scripts for bundled resources and release prep.
-- `docs/`: project notes that are more detailed than the README.
-- `tests/`: focused tests for planning, naming, and command construction.
+The current workflow is aimed at World of Warcraft addon sound tuning, where a
+custom slider can select among generated files and a separate off checkbox can
+mute the sound.
+
+## Current Behavior
+
+- Input: one audio file.
+- Output: numbered Ogg Vorbis files named `source_0.ogg`, `source_1.ogg`, etc.
+- File `_0` is the loudest generated file.
+- Later files are quieter by a regular dB interval.
+- Peak analysis uses FFmpeg `astats` overall `Peak level dB`.
+- AudioFix calculates the loudest output gain as:
+
+```text
+calculated gain dB = -overall peak dB - abs(headroom dB)
+```
+
+- Default headroom is `0.500 dB`, targeting a `-0.500 dB` peak for file `_0`.
+- Conversion uses FFmpeg's `volume=...dB` filter.
+- Successful runs write `conversion_log.txt`.
+- Failed runs write `conversion_failed_log.txt`.
+
+## Level Controls
+
+The GUI generates outputs with regular/even dB intervals. The user chooses a
+minimum dB range and then selects which level input should be authoritative:
+
+- `File Count`: enter the number of output files; AudioFix calculates the regular interval dB.
+- `Interval dB`: enter the regular dB spacing; AudioFix calculates file count.
+
+Current defaults:
+
+```text
+Maximum dB: 0.000
+Minimum dB: -26.000
+File Count: 20
+Interval dB: 26 / 19 = 1.368421...
+```
+
+The default range reflects in-game testing: files quieter than about `-26 dB`
+were not useful because the addon can mute sounds separately.
+
+## Slider Mapping
+
+Percent labels are useful UI, but audio gain is not linear percentage behavior.
+AudioFix preserves the original sound character by applying plain gain changes
+instead of LUFS normalization.
+
+Useful amplitude equations:
+
+```text
+dB = 20 * log10(amplitude)
+amplitude = 10^(dB / 20)
+percent = 100 * 10^(dB / 20)
+```
+
+Examples:
+
+| Linear amplitude | Gain dB |
+|-----------------:|--------:|
+| 100% | 0.00 dB |
+| 50% | -6.02 dB |
+| 25% | -12.04 dB |
+| 10% | -20.00 dB |
+| 5% | -26.02 dB |
+
+For the current default `20` files from `0 dB` to `-26 dB`, AudioFix uses
+regular dB spacing across the range. The slider-position gain is added after
+peak-headroom gain:
+
+```text
+final gain dB = calculated peak-headroom gain dB + slider-position gain dB
+```
+
+See [docs/slider-level-mapping.md](docs/slider-level-mapping.md) for the current
+default mapping table and reference formulas.
+
+## Encoder Controls
+
+The GUI shows detected source metadata:
+
+- codec
+- bitrate
+- sample rate
+- channel count
+- raw peak after analysis
+
+Output encoding is Ogg Vorbis. The user can either:
+
+- use Vorbis quality mode, or
+- match source bitrate when the source bitrate is available.
+
+AudioFix reuses detected source sample rate and channel count where possible.
 
 ## Run the GUI
+
 From the project root:
 
 ```powershell
 python run_gui.py
 ```
 
-## MVP Scope
-- Batch loudness conversion first.
-- The app handles simple peak analysis with ffmpeg.
-- The app applies deterministic dB gain changes and exports numbered files.
-- Advanced restoration, clipping repair, compression repair, and generative audio features are future ideas tracked in `docs/ideas.md`.
-
-## Example
-- Example/source: https://www.wowhead.com/sound=8960/readycheck  
-The infamous "Your dungeon is ready" sound that is much louder than desired.
-
-## Words are Words
-Audio (data) or (physical) Sound ?  
-A microphone converts sound into audio, and a speaker converts audio into sound.
-
-## Levels
-- Use the minimum dB range and interval dB to calculate output count.
-- Use the calculated raw-plus-headroom value as the first output gain, then apply interval reductions for later outputs.
-- The first gain value is calculated as `-1 * (overall peak dB + headroom dB)`.
-- Most WoW sound files appear to be volume maximized already, so the current workflow assumes the source is loud enough and generates quieter variants.
-- Automatic LUFS normalization and perceived-loudness analysis are out of scope for the first version.
-
 ## Tools
 
-Utility scripts for maintaining bundled resources belong under `tools/`.
+Current maintenance scripts:
 
-Current scripts:
+- `tools/check_ffmpeg.py`: verify bundled or PATH FFmpeg/FFprobe.
+- `tools/install_ffmpeg.py`: download and install Windows FFmpeg/FFprobe into
+  `vendor/ffmpeg/win-x64/bin/`.
 
-- `tools/check_ffmpeg.py`: verify bundled or PATH ffmpeg/ffprobe.
-- `tools/install_ffmpeg.py`: download and install Windows ffmpeg/ffprobe into `vendor/ffmpeg/win-x64/bin/`.
-
-Planned scripts:
-
-- prepare standalone release artifacts
-
-## Vendor Resources
-
-AudioFix is intended to be a mostly standalone utility. Third-party runtime
-tools that users should not have to install manually belong here.
-
-### ffmpeg
-
-Expected layout for Windows builds:
+AudioFix prefers bundled tools first:
 
 ```text
 vendor/
@@ -115,10 +130,33 @@ vendor/
         ffprobe.exe
 ```
 
-Do not commit downloaded archives unless there is a deliberate release reason.
-The app should prefer bundled binaries first and can later fall back to system
-`ffmpeg` during development.
+The app checks both binaries with `-version` at startup and before conversion.
+Runtime conversion does not download or update tools automatically.
 
-At startup and before conversion, AudioFix checks both `ffmpeg` and `ffprobe`
-by running their `-version` commands. Runtime conversion does not download or
-update these tools automatically.
+## Project Structure
+
+- `src/audiofix/gui/`: Tkinter interface.
+- `src/audiofix/core/`: planning, analysis, conversion, FFmpeg command building,
+  logging, defaults, and runtime paths.
+- `tests/`: focused tests for deterministic core behavior.
+- `tools/`: maintenance scripts for bundled resources and release prep.
+- `docs/`: supporting notes and reference tables.
+- `vendor/ffmpeg/`: bundled FFmpeg/FFprobe resources.
+
+## Scope
+
+In scope:
+
+- peak analysis
+- deterministic gain reduction
+- Ogg Vorbis export
+- output validation with FFprobe
+- success/failure logs
+
+Out of scope for the current utility:
+
+- LUFS normalization
+- perceived-loudness matching
+- clipping repair
+- compression repair
+- generative audio restoration

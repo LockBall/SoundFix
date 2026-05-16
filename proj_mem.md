@@ -12,8 +12,9 @@ Shared memory for coding agents. Keep this file concise and durable: architectur
 - The initial tool is a one-to-many batch loudness converter.
 - AudioFix analyzes each source audio file with ffmpeg `astats` and calculates the first gain value from raw peak plus headroom.
 - AudioFix generates multiple quieter output files from one source file.
-- The user controls the minimum dB range and interval dB; AudioFix calculates the number of output files / steps.
-- The raw-plus-headroom dB value is calculated per input file and is the gain for file `_0`; later files apply additional interval dB reductions.
+- The user controls the minimum dB range and chooses whether file count or interval dB is the active level input; AudioFix calculates the inactive value and generates regular dB intervals.
+- The raw-plus-headroom dB value is calculated per input file and is the gain for file `_0`; later files apply additional regular interval dB reductions.
+- Current level defaults target the addon slider behavior: minimum `-26.000 dB`, file-count input mode, file count `20`, generated interval `26 / 19 = 1.368 dB`.
 - Peak analysis uses ffmpeg `astats` overall `Peak level dB` to calculate `-1 * (raw peak dB + headroom dB)`.
 - Headroom is positive dB below 0 dB; default `0.500` targets a `-0.500 dB` peak before later interval reductions.
 - Source audio metadata is displayed after input selection. User-facing builds should reuse source audio settings where possible instead of exposing codec/bitrate as creative options.
@@ -59,6 +60,6 @@ Shared memory for coding agents. Keep this file concise and durable: architectur
 
 ## GUI/Layout Rules
 - GUI elements should have a clear and consistent placement system.
-- MVP controls should include source file, displayed source audio metadata, output folder, maximum dB, minimum dB, interval dB, raw peak, headroom dB, raw-plus-headroom dB, calculated number of files / steps, encoder mode, Vorbis quality, overwrite behavior, run action, progress/status, and command preview.
+- MVP controls should include source file, displayed source audio metadata, output folder, maximum dB, minimum dB, level input mode, file count, interval dB, raw peak, headroom dB, raw-plus-headroom dB, encoder mode, Vorbis quality, overwrite behavior, run action, progress/status, and command preview.
 - Maintain basic light and dark themes with standard-library `ttk`; default to dark while keeping light available.
 - Use a traditional top menu bar for global app actions. Current pattern: `View > Theme` for theme selection and `Help > About AudioFix` for app information.

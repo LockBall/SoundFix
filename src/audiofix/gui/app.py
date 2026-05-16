@@ -19,6 +19,7 @@ from audiofix.core.config import (
     DB_DISPLAY_DECIMALS,
     DB_FIELD_WIDTH_CHARS,
     DEFAULT_CALCULATED_GAIN_DB_TEXT,
+    DEFAULT_FILE_COUNT,
     DEFAULT_INTERVAL_DB,
     DEFAULT_ENCODER_MODE,
     DEFAULT_MAX_DB,
@@ -65,6 +66,7 @@ from audiofix.core.logging import (
 )
 from audiofix.core.planning import (
     build_output_plan,
+    calculate_interval_db,
     calculate_step_count,
 )
 from audiofix.core.tasks import start_background_task
@@ -76,6 +78,8 @@ ENCODER_MODE_LABELS = {
     "Match Source Bitrate": ENCODER_MODE_BITRATE,
 }
 ENCODER_MODE_NAMES = {value: label for label, value in ENCODER_MODE_LABELS.items()}
+LEVEL_INPUT_FILE_COUNT = "File Count"
+LEVEL_INPUT_INTERVAL_DB = "Interval dB"
 
 
 def format_quality_value(quality: float) -> str:
@@ -130,7 +134,6 @@ def main() -> None:
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
     frame.columnconfigure(0, weight=1)
-    frame.rowconfigure(2, weight=1)
 
     theme_var = tk.StringVar(value=DEFAULT_THEME)
     root.configure(menu=build_menu(root, theme_var))
@@ -155,6 +158,7 @@ def main() -> None:
     min_db_var = tk.StringVar(value="")
     calculated_gain_db_var = tk.StringVar(value=DEFAULT_CALCULATED_GAIN_DB_TEXT)
     interval_db_var = tk.StringVar(value="")
+    level_input_mode_var = tk.StringVar(value=LEVEL_INPUT_FILE_COUNT)
     peak_headroom_db_var = tk.StringVar(value="")
     step_count_var = tk.StringVar(value="")
     output_folder_var = tk.StringVar(value="")
@@ -181,6 +185,7 @@ def main() -> None:
     max_db_var.set(format_db(DEFAULT_MAX_DB))
     min_db_var.set(format_db(DEFAULT_MIN_DB))
     interval_db_var.set(format_db(DEFAULT_INTERVAL_DB))
+    step_count_var.set(str(DEFAULT_FILE_COUNT))
     peak_headroom_db_var.set(format_db(DEFAULT_PEAK_HEADROOM_DB))
 
     def update_tool_status():
@@ -220,16 +225,71 @@ def main() -> None:
         last_audio_info[0] = info
         return info
 
-    def update_step_count(*_: object) -> None:
-        try:
-            step_count = calculate_step_count(
-                min_db=float(min_db_var.get()),
-                interval_db=float(interval_db_var.get()),
-            )
-        except ValueError:
-            step_count_var.set("Invalid")
+    def parse_step_count() -> int:
+        raw_step_count = float(step_count_var.get())
+        step_count = int(raw_step_count)
+        if step_count != raw_step_count:
+            raise ValueError("file count must be a whole number")
+        return step_count
+
+    def calculate_level_settings() -> tuple[float, float, int]:
+        min_db = float(min_db_var.get())
+        if level_input_mode_var.get() == LEVEL_INPUT_INTERVAL_DB:
+            interval_db = float(interval_db_var.get())
+            step_count = calculate_step_count(min_db=min_db, interval_db=interval_db)
+            return min_db, interval_db, step_count
+
+        step_count = parse_step_count()
+        interval_db = calculate_interval_db(min_db=min_db, step_count=step_count)
+        return min_db, interval_db, step_count
+
+    updating_level_fields = [False]
+
+    def update_level_fields(*_: object) -> None:
+        if updating_level_fields[0]:
             return
-        step_count_var.set(str(step_count))
+
+        updating_level_fields[0] = True
+        try:
+            _min_db, interval_db, step_count = calculate_level_settings()
+        except ValueError:
+            if level_input_mode_var.get() == LEVEL_INPUT_INTERVAL_DB:
+                step_count_var.set("Invalid")
+            else:
+                interval_db_var.set("Invalid")
+        else:
+            if level_input_mode_var.get() == LEVEL_INPUT_INTERVAL_DB:
+                step_count_var.set(str(step_count))
+            else:
+                interval_db_var.set(format_db(interval_db))
+        finally:
+            updating_level_fields[0] = False
+
+        update_command_preview()
+
+    def update_level_input_mode(*_: object) -> None:
+        if level_input_mode_var.get() == LEVEL_INPUT_INTERVAL_DB:
+            interval_db_entry.state(["!disabled"])
+            step_count_entry.state(["disabled"])
+        else:
+            interval_db_entry.state(["disabled"])
+            step_count_entry.state(["!disabled"])
+        update_level_fields()
+
+    def on_interval_db_focus_out() -> None:
+        if level_input_mode_var.get() != LEVEL_INPUT_INTERVAL_DB:
+            return
+        format_decimal_var(interval_db_var)
+        update_level_fields()
+
+    def on_step_count_focus_out() -> None:
+        if level_input_mode_var.get() != LEVEL_INPUT_FILE_COUNT:
+            return
+        try:
+            step_count_var.set(str(parse_step_count()))
+        except ValueError:
+            return
+        update_level_fields()
 
     def update_vorbis_quality_markers(*_: object) -> None:
         selected_quality = round(vorbis_quality_var.get() * 2) / 2
@@ -279,9 +339,9 @@ def main() -> None:
             return
 
         try:
-            interval_db = float(interval_db_var.get())
+            _min_db, interval_db, _step_count = calculate_level_settings()
         except ValueError:
-            command_preview_var.set("ffmpeg command preview unavailable: enter interval dB.")
+            command_preview_var.set("ffmpeg command preview unavailable: enter valid level settings.")
             return
 
         source_path = Path(source_text)
@@ -367,7 +427,13 @@ def main() -> None:
         input_file_entry.state(state)
         input_browse_button.state(state)
         min_db_entry.state(state)
-        interval_db_entry.state(state)
+        interval_input_radio.state(state)
+        file_count_input_radio.state(state)
+        if enabled:
+            update_level_input_mode()
+        else:
+            interval_db_entry.state(["disabled"])
+            step_count_entry.state(["disabled"])
         peak_headroom_db_entry.state(state)
         calculated_gain_db_entry.state(state)
         analyze_peak_button.state(state)
@@ -502,10 +568,9 @@ def main() -> None:
             source_text = file_path_var.get().strip()
             output_text = output_folder_var.get().strip()
             max_db = float(max_db_var.get())
-            min_db = float(min_db_var.get())
-            interval_db = float(interval_db_var.get())
+            min_db, interval_db, step_count = calculate_level_settings()
+            update_level_fields()
             headroom_db = float(peak_headroom_db_var.get())
-            step_count = calculate_step_count(min_db=min_db, interval_db=interval_db)
         except ValueError as error:
             status_var.set(f"Invalid settings: {error}")
             return
@@ -653,6 +718,13 @@ def main() -> None:
         text="Select input, adjust settings, then choose an output folder.",
         style="Muted.TLabel",
     ).grid(row=0, column=0, sticky="w")
+
+    def configure_level_columns(container: ttk.Frame) -> None:
+        container.columnconfigure(0, weight=1, uniform="settings")
+        container.columnconfigure(1, weight=0)
+        for column in range(2, SETTINGS_COLUMN_COUNT):
+            container.columnconfigure(column, weight=1, uniform="settings")
+
     tools_frame = ttk.Frame(frame)
     tools_frame.grid(row=0, column=0, sticky="e")
     ttk.Label(tools_frame, text="Modules Loaded", style="Muted.TLabel").grid(
@@ -688,16 +760,15 @@ def main() -> None:
     )
     input_browse_button = ttk.Button(input_frame, text="Browse...", command=browse_file)
     input_browse_button.grid(row=0, column=2, sticky="e")
-    input_meta_frame = ttk.Frame(input_frame)
+
+    input_meta_frame = ttk.Frame(frame)
     input_meta_frame.grid(
-        row=1,
-        column=1,
-        columnspan=2,
+        row=2,
+        column=0,
         sticky="ew",
         pady=(COMPACT_SECTION_ROW_GAP_PX, 0),
     )
-    for column in range(SETTINGS_COLUMN_COUNT):
-        input_meta_frame.columnconfigure(column, weight=1, uniform="settings")
+    configure_level_columns(input_meta_frame)
     ttk.Label(input_meta_frame, textvariable=audio_info_var, style="Muted.TLabel").grid(
         row=0,
         column=0,
@@ -709,16 +780,16 @@ def main() -> None:
         textvariable=raw_peak_var,
         style="Muted.TLabel",
         anchor="w",
+        width=CALCULATED_GAIN_LABEL_WIDTH_CHARS,
     ).grid(
         row=0,
-        column=2,
-        sticky="ew",
+        column=4,
+        sticky="w",
     )
 
     settings_frame = ttk.Frame(frame)
-    settings_frame.grid(row=2, column=0, sticky="new", pady=(APP_ROW_GAP_PX, 0))
-    for column in range(SETTINGS_COLUMN_COUNT):
-        settings_frame.columnconfigure(column, weight=1, uniform="settings")
+    settings_frame.grid(row=3, column=0, sticky="new", pady=(APP_ROW_GAP_PX, 0))
+    configure_level_columns(settings_frame)
 
     ttk.Label(
         settings_frame,
@@ -734,33 +805,66 @@ def main() -> None:
     )
     min_db_entry = add_db_entry(settings_frame, "Minimum dB", min_db_var, row=2, column=0)
 
+    interval_input_radio = ttk.Radiobutton(
+        settings_frame,
+        variable=level_input_mode_var,
+        value=LEVEL_INPUT_INTERVAL_DB,
+    )
+    interval_input_radio.grid(
+        row=1,
+        column=1,
+        sticky="e",
+        padx=(0, CONTROL_TITLE_GAP_PX),
+        pady=(CONTROL_TITLE_GAP_PX, RELATED_CONTROL_GAP_PX),
+    )
+    file_count_input_radio = ttk.Radiobutton(
+        settings_frame,
+        variable=level_input_mode_var,
+        value=LEVEL_INPUT_FILE_COUNT,
+    )
+    file_count_input_radio.grid(
+        row=3,
+        column=1,
+        sticky="e",
+        padx=(0, CONTROL_TITLE_GAP_PX),
+        pady=(RELATED_CONTROL_GAP_PX, 0),
+    )
+
     interval_db_entry = add_db_entry(
         settings_frame,
         "Interval dB",
         interval_db_var,
         row=0,
-        column=1,
+        column=2,
         bottom_gap=RELATED_CONTROL_GAP_PX,
     )
+    interval_db_entry.bind("<FocusOut>", lambda _event: on_interval_db_focus_out())
     ttk.Label(
         settings_frame,
-        text="Files Count",
+        text="File Count",
         anchor="center",
         width=DB_FIELD_WIDTH_CHARS,
-    ).grid(row=2, column=1, sticky="w")
-    ttk.Label(settings_frame, textvariable=step_count_var, width=DB_FIELD_WIDTH_CHARS, anchor="e").grid(
+    ).grid(row=2, column=2, sticky="w")
+    step_count_entry = ttk.Entry(
+        settings_frame,
+        textvariable=step_count_var,
+        width=DB_FIELD_WIDTH_CHARS,
+        justify="right",
+    )
+    step_count_entry.grid(
         row=3,
-        column=1,
+        column=2,
         sticky="w",
         pady=(RELATED_CONTROL_GAP_PX, 0),
     )
+    step_count_entry.bind("<FocusOut>", lambda _event: on_step_count_focus_out())
 
     peak_headroom_db_entry = add_db_entry(
         settings_frame,
         "Headroom dB",
         peak_headroom_db_var,
         row=0,
-        column=2,
+        column=3,
         bottom_gap=RELATED_CONTROL_GAP_PX,
     )
     peak_headroom_db_entry.bind("<FocusOut>", lambda _event: on_peak_headroom_focus_out())
@@ -770,7 +874,7 @@ def main() -> None:
         "- (Raw + Head) dB",
         calculated_gain_db_var,
         row=0,
-        column=3,
+        column=4,
         label_width=CALCULATED_GAIN_LABEL_WIDTH_CHARS,
     )
     analyze_peak_button = ttk.Button(
@@ -778,17 +882,18 @@ def main() -> None:
         text="Analyze peak",
         command=analyze_peak,
     )
-    analyze_peak_button.grid(row=3, column=3, sticky="w", pady=(CONTROL_TITLE_GAP_PX, 0))
+    analyze_peak_button.grid(row=3, column=4, sticky="w", pady=(CONTROL_TITLE_GAP_PX, 0))
 
-    min_db_var.trace_add("write", update_step_count)
-    interval_db_var.trace_add("write", update_step_count)
-    interval_db_var.trace_add("write", update_command_preview)
+    min_db_var.trace_add("write", update_level_fields)
+    step_count_var.trace_add("write", update_level_fields)
+    interval_db_var.trace_add("write", update_level_fields)
+    level_input_mode_var.trace_add("write", update_level_input_mode)
     calculated_gain_db_var.trace_add("write", update_command_preview)
     overwrite_var.trace_add("write", update_command_preview)
     encoder_mode_choice_var.trace_add("write", update_command_preview)
     vorbis_quality_var.trace_add("write", update_vorbis_quality_markers)
     vorbis_quality_var.trace_add("write", update_command_preview)
-    update_step_count()
+    update_level_input_mode()
     update_command_preview()
 
     encoder_frame = ttk.Frame(frame)

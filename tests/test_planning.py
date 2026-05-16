@@ -12,6 +12,7 @@ if str(SRC) not in sys.path:
 
 from audiofix.core.planning import (
     build_output_plan,
+    calculate_interval_db,
     calculate_step_count,
 )
 
@@ -48,6 +49,15 @@ class BuildOutputPlanTests(unittest.TestCase):
             calculate_step_count(min_db=0.0, interval_db=3.0)
         with self.assertRaises(ValueError):
             calculate_step_count(min_db=-60.0, interval_db=0.0)
+
+    def test_calculates_interval_from_min_db_and_file_count(self) -> None:
+        self.assertAlmostEqual(calculate_interval_db(min_db=-26.0, step_count=20), 26.0 / 19)
+
+    def test_rejects_invalid_interval_inputs(self) -> None:
+        with self.assertRaises(ValueError):
+            calculate_interval_db(min_db=0.0, step_count=20)
+        with self.assertRaises(ValueError):
+            calculate_interval_db(min_db=-26.0, step_count=1)
 
     def test_builds_numbered_outputs_with_db_steps(self) -> None:
         plan = build_output_plan(

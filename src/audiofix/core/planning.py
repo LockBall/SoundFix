@@ -23,6 +23,15 @@ def calculate_step_count(min_db: float, interval_db: float) -> int:
     return math.floor(abs(min_db) / interval_db) + 1
 
 
+def calculate_interval_db(min_db: float, step_count: int) -> float:
+    if min_db >= 0:
+        raise ValueError("min_db must be less than 0")
+    if step_count < 2:
+        raise ValueError("file count must be at least 2")
+
+    return abs(min_db) / (step_count - 1)
+
+
 def build_output_plan(
     source_path: Path,
     output_dir: Path,
