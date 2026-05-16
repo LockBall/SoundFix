@@ -42,7 +42,6 @@ minimum dB range and then selects which level input should be authoritative:
 Current defaults:
 
 ```text
-Maximum dB: 0.000
 Minimum dB: -26.000
 File Count: 20
 Interval dB: 26 / 19 = 1.368421...

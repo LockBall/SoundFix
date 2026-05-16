@@ -11,7 +11,6 @@ from audiofix.core.planning import OutputPlanItem
 class ConversionLogSettings:
     source_path: Path
     output_dir: Path
-    max_db: float
     min_db: float
     interval_db: float
     raw_peak_db: float | None
@@ -66,7 +65,6 @@ def build_conversion_log_lines(
         "Settings:",
         f"Source: {settings.source_path}",
         f"Output folder: {settings.output_dir}",
-        f"Maximum dB: {settings.max_db:.3f}",
         f"Minimum dB: {settings.min_db:.3f}",
         f"Interval dB: {settings.interval_db:.3f}",
         f"Raw peak dB: {_format_optional_db(settings.raw_peak_db)}",

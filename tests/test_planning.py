@@ -26,7 +26,6 @@ from audiofix.core.ffmpeg import (
     build_audio_filter,
     build_ffmpeg_command,
     check_ffmpeg_tools,
-    convert_plan_item,
     gain_to_peak_headroom_db,
     measure_max_volume_db,
     validate_output_file,
@@ -243,37 +242,6 @@ class FfmpegCommandTests(unittest.TestCase):
         self.assertIn("5", command)
         self.assertNotIn("-b:a", command)
 
-    def test_convert_plan_item_uses_built_command(self) -> None:
-        plan = build_output_plan(
-            source_path=Path("source.ogg"),
-            output_dir=Path("out"),
-            db_offset=-12.39,
-            step_count=1,
-            interval_db=-3.0,
-        )
-
-        with mock.patch("audiofix.core.ffmpeg.run_ffmpeg_command") as run_command:
-            convert_plan_item(
-                ffmpeg_path=Path("ffmpeg"),
-                source_path=Path("source.ogg"),
-                item=plan[0],
-                options=FfmpegOptions(overwrite=True),
-            )
-
-        run_command.assert_called_once_with(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                "source.ogg",
-                "-filter:a",
-                "volume=-12.39dB",
-                "-c:a",
-                "libvorbis",
-                str(Path("out/source_0.ogg")),
-            ]
-        )
-
     def test_validates_output_file_with_ffprobe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "output.ogg"
@@ -313,7 +281,6 @@ class ConversionLogTests(unittest.TestCase):
         settings = ConversionLogSettings(
             source_path=Path("source.ogg"),
             output_dir=Path("out"),
-            max_db=0.0,
             min_db=-60.0,
             interval_db=3.0,
             raw_peak_db=1.0,
@@ -391,7 +358,6 @@ class ConversionServiceTests(unittest.TestCase):
             settings = ConversionLogSettings(
                 source_path=Path("source.ogg"),
                 output_dir=output_dir,
-                max_db=0.0,
                 min_db=-60.0,
                 interval_db=3.0,
                 raw_peak_db=1.0,

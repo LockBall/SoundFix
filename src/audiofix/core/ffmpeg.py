@@ -263,21 +263,6 @@ def build_audio_filter(item: OutputPlanItem) -> str:
     return f"volume={item.gain_db:g}dB"
 
 
-def convert_plan_item(
-    ffmpeg_path: Path,
-    source_path: Path,
-    item: OutputPlanItem,
-    options: FfmpegOptions,
-) -> subprocess.CompletedProcess[str]:
-    command = build_ffmpeg_command(
-        ffmpeg_path=ffmpeg_path,
-        source_path=source_path,
-        item=item,
-        options=options,
-    )
-    return run_ffmpeg_command(command)
-
-
 def validate_output_file(ffprobe_path: Path, output_path: Path) -> None:
     if not output_path.is_file():
         raise RuntimeError("output file was not created")

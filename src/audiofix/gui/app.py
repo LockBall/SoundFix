@@ -22,7 +22,6 @@ from audiofix.core.config import (
     DEFAULT_FILE_COUNT,
     DEFAULT_INTERVAL_DB,
     DEFAULT_ENCODER_MODE,
-    DEFAULT_MAX_DB,
     DEFAULT_MIN_DB,
     DEFAULT_PEAK_HEADROOM_DB,
     DEFAULT_VORBIS_QUALITY,
@@ -154,7 +153,6 @@ def main() -> None:
     media_dir = runtime_paths.project_root / "media"
 
     file_path_var = tk.StringVar(value="")
-    max_db_var = tk.StringVar(value="")
     min_db_var = tk.StringVar(value="")
     calculated_gain_db_var = tk.StringVar(value=DEFAULT_CALCULATED_GAIN_DB_TEXT)
     interval_db_var = tk.StringVar(value="")
@@ -177,12 +175,12 @@ def main() -> None:
     last_output_folder: list[Path | None] = [None]
     peak_analysis_running = [False]
     conversion_running = [False]
+    tool_status_cache: list[ToolStatus | None] = [None]
 
     def format_db(value: float, signed: bool = False) -> str:
         sign = "+" if signed else ""
         return f"{value:{sign}.{DB_DISPLAY_DECIMALS}f}"
 
-    max_db_var.set(format_db(DEFAULT_MAX_DB))
     min_db_var.set(format_db(DEFAULT_MIN_DB))
     interval_db_var.set(format_db(DEFAULT_INTERVAL_DB))
     step_count_var.set(str(DEFAULT_FILE_COUNT))
@@ -194,11 +192,15 @@ def main() -> None:
         return tool_status
 
     def set_tool_status(tool_status: ToolStatus) -> None:
+        tool_status_cache[0] = tool_status
         ffmpeg_status_var.set(tool_status.ffmpeg.display_text())
         ffprobe_status_var.set(tool_status.ffprobe.display_text())
 
     def refresh_tool_status() -> None:
         update_tool_status()
+
+    def get_cached_tool_status() -> ToolStatus:
+        return tool_status_cache[0] or update_tool_status()
 
     def schedule_ui(callback) -> None:
         root.after(0, callback)
@@ -209,8 +211,8 @@ def main() -> None:
         channels = f"{info.channels} ch" if info.channels else "unknown channels"
         return f"Audio info: {info.codec_name}, {bit_rate}, {sample_rate}, {channels}"
 
-    def get_audio_info(source_path: Path) -> AudioInfo | None:
-        tool_status = update_tool_status()
+    def get_audio_info(source_path: Path, tool_status: ToolStatus | None = None) -> AudioInfo | None:
+        tool_status = tool_status or update_tool_status()
         if not tool_status.ffprobe.available or tool_status.ffprobe.path is None:
             error = tool_status.ffprobe.error or "ffprobe not found"
             audio_info_var.set(f"Audio info: {error}.")
@@ -327,7 +329,7 @@ def main() -> None:
             command_preview_var.set("ffmpeg command preview unavailable.")
             return
 
-        tool_status = update_tool_status()
+        tool_status = get_cached_tool_status()
         if not tool_status.ffmpeg.available or tool_status.ffmpeg.path is None:
             command_preview_var.set("ffmpeg command preview unavailable: ffmpeg missing.")
             return
@@ -567,7 +569,6 @@ def main() -> None:
         try:
             source_text = file_path_var.get().strip()
             output_text = output_folder_var.get().strip()
-            max_db = float(max_db_var.get())
             min_db, interval_db, step_count = calculate_level_settings()
             update_level_fields()
             headroom_db = float(peak_headroom_db_var.get())
@@ -594,14 +595,6 @@ def main() -> None:
             status_var.set("Select a valid input file.")
             return
         clear_generated_output_state()
-        audio_info = get_audio_info(source_path)
-        if audio_info is None:
-            status_var.set("Cannot read input audio settings with ffprobe.")
-            return
-        if ENCODER_MODE_LABELS[encoder_mode_choice_var.get()] == ENCODER_MODE_BITRATE and audio_info.bit_rate is None:
-            status_var.set("Input audio bitrate is unknown; conversion stopped to avoid changing it.")
-            return
-
         tool_status = update_tool_status()
         if not tool_status.available or tool_status.ffmpeg.path is None:
             status_var.set(
@@ -611,6 +604,14 @@ def main() -> None:
             return
         if tool_status.ffprobe.path is None:
             status_var.set("ffprobe unavailable; cannot validate generated files.")
+            return
+
+        audio_info = get_audio_info(source_path, tool_status)
+        if audio_info is None:
+            status_var.set("Cannot read input audio settings with ffprobe.")
+            return
+        if ENCODER_MODE_LABELS[encoder_mode_choice_var.get()] == ENCODER_MODE_BITRATE and audio_info.bit_rate is None:
+            status_var.set("Input audio bitrate is unknown; conversion stopped to avoid changing it.")
             return
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -631,7 +632,6 @@ def main() -> None:
         settings = ConversionLogSettings(
             source_path=source_path,
             output_dir=output_dir,
-            max_db=max_db,
             min_db=min_db,
             interval_db=interval_db,
             raw_peak_db=parse_raw_peak_display(),
@@ -791,19 +791,7 @@ def main() -> None:
     settings_frame.grid(row=3, column=0, sticky="new", pady=(APP_ROW_GAP_PX, 0))
     configure_level_columns(settings_frame)
 
-    ttk.Label(
-        settings_frame,
-        text="Maximum dB",
-        anchor="center",
-        width=DB_FIELD_WIDTH_CHARS,
-    ).grid(row=0, column=0, sticky="w")
-    ttk.Label(settings_frame, textvariable=max_db_var, width=DB_FIELD_WIDTH_CHARS, anchor="e").grid(
-        row=1,
-        column=0,
-        sticky="w",
-        pady=(CONTROL_TITLE_GAP_PX, RELATED_CONTROL_GAP_PX),
-    )
-    min_db_entry = add_db_entry(settings_frame, "Minimum dB", min_db_var, row=2, column=0)
+    min_db_entry = add_db_entry(settings_frame, "Minimum dB", min_db_var, row=0, column=0)
 
     interval_input_radio = ttk.Radiobutton(
         settings_frame,

@@ -60,6 +60,6 @@ Shared memory for coding agents. Keep this file concise and durable: architectur
 
 ## GUI/Layout Rules
 - GUI elements should have a clear and consistent placement system.
-- MVP controls should include source file, displayed source audio metadata, output folder, maximum dB, minimum dB, level input mode, file count, interval dB, raw peak, headroom dB, raw-plus-headroom dB, encoder mode, Vorbis quality, overwrite behavior, run action, progress/status, and command preview.
+- MVP controls should include source file, displayed source audio metadata, output folder, minimum dB, level input mode, file count, interval dB, raw peak, headroom dB, raw-plus-headroom dB, encoder mode, Vorbis quality, overwrite behavior, run action, progress/status, and command preview.
 - Maintain basic light and dark themes with standard-library `ttk`; default to dark while keeping light available.
 - Use a traditional top menu bar for global app actions. Current pattern: `View > Theme` for theme selection and `Help > About AudioFix` for app information.

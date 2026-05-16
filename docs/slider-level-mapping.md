@@ -10,13 +10,13 @@ AudioFix uses regular/even dB spacing for generated files. It currently
 defaults to:
 
 ```text
-maximum dB: 0.000
 minimum dB: -26.000
 file count: 20
 interval dB: 26 / 19 = 1.368421...
 ```
 
-File index `0` is the loudest output. Later indices get quieter.
+File index `0` is the loudest output and uses `0.000 dB` slider-position gain.
+Later indices get quieter.
 
 The generated per-position gain is a regular dB interval:
 
