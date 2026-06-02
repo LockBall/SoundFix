@@ -224,6 +224,10 @@ e.g. achievmentsound1, FishingBobber_ver2
     - `OK`
     - `Save As...` with new name
 
+  **Mono** for positional sounds so the game engine can place it correctly.
+
+  **Stereo** (slightly wide) for non‑positional sounds that always play centered.
+
 
 #### Amplitude Correction / De-Clipping
 
