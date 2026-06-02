@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 from audiofix.core.ffmpeg import (
     FfmpegOptions,
@@ -16,6 +17,8 @@ from audiofix.core.logging import (
     write_conversion_log,
 )
 from audiofix.core.planning import OutputPlanItem
+
+OUTPUT_INDEX_SUFFIX_RE = re.compile(r"_(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -104,7 +107,7 @@ def run_conversion_request(
         )
 
     success = failure_message is None and len(log_items) == len(request.plan)
-    log_path = request.output_dir / ("conversion_log.txt" if success else "conversion_failed_log.txt")
+    log_path = request.output_dir / build_conversion_log_filename(request.plan, success=success)
     try:
         write_conversion_log(
             log_path=log_path,
@@ -119,7 +122,7 @@ def run_conversion_request(
         else:
             failure_message = f"Generated files, but failed to write log: {error}"
         success = False
-        log_path = request.output_dir / "conversion_failed_log.txt"
+        log_path = request.output_dir / build_conversion_log_filename(request.plan, success=False)
         try:
             write_conversion_log(
                 log_path=log_path,
@@ -139,3 +142,15 @@ def run_conversion_request(
         failure_message=failure_message,
         log_path=log_path,
     )
+
+
+def build_conversion_log_filename(plan: list[OutputPlanItem], success: bool) -> str:
+    log_name = "conversion_log.txt" if success else "conversion_failed_log.txt"
+    if not plan:
+        return log_name
+
+    output_stem = plan[0].output_path.stem
+    prefix = OUTPUT_INDEX_SUFFIX_RE.sub("", output_stem).strip()
+    if not prefix:
+        return log_name
+    return f"{prefix}_{log_name}"

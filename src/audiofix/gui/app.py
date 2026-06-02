@@ -163,6 +163,7 @@ def main() -> None:
     audio_info_var = tk.StringVar(value="Audio info: select an input file.")
     raw_peak_var = tk.StringVar(value="Raw peak: --")
     overwrite_var = tk.BooleanVar(value=False)
+    disable_gain_adjustment_var = tk.BooleanVar(value=False)
     encoder_mode_choice_var = tk.StringVar(value=ENCODER_MODE_NAMES[DEFAULT_ENCODER_MODE])
     vorbis_quality_var = tk.DoubleVar(value=DEFAULT_VORBIS_QUALITY)
     vorbis_quality_labels: list[ttk.Label] = []
@@ -345,16 +346,19 @@ def main() -> None:
             return
 
         try:
-            calculated_gain_db = float(calculated_gain_db_var.get())
-        except ValueError:
-            command_preview_var.set("ffmpeg command preview unavailable: enter raw plus headroom dB.")
-            return
-
-        try:
             _min_db, interval_db, _step_count = calculate_level_settings()
         except ValueError:
             command_preview_var.set("ffmpeg command preview unavailable: enter valid level settings.")
             return
+
+        if disable_gain_adjustment_var.get():
+            calculated_gain_db = 0.0
+        else:
+            try:
+                calculated_gain_db = float(calculated_gain_db_var.get())
+            except ValueError:
+                command_preview_var.set("ffmpeg command preview unavailable: enter raw plus headroom dB.")
+                return
 
         try:
             output_dir, output_stem = parse_output_target()
@@ -436,7 +440,9 @@ def main() -> None:
         state = ["!disabled"] if enabled else ["disabled"]
         input_file_entry.state(state)
         input_browse_button.state(state)
-        peak_headroom_db_entry.state(state)
+        gain_adjustment_checkbutton.state(state)
+        gain_state = state if not disable_gain_adjustment_var.get() else ["disabled"]
+        peak_headroom_db_entry.state(gain_state)
         encoder_mode_combobox.state(["readonly"] if enabled else ["disabled"])
         analyze_peak_button.state(state)
 
@@ -452,8 +458,10 @@ def main() -> None:
         else:
             interval_db_entry.state(["disabled"])
             step_count_entry.state(["disabled"])
-        peak_headroom_db_entry.state(state)
-        calculated_gain_db_entry.state(state)
+        gain_adjustment_checkbutton.state(state)
+        gain_state = state if not disable_gain_adjustment_var.get() else ["disabled"]
+        peak_headroom_db_entry.state(gain_state)
+        calculated_gain_db_entry.state(gain_state)
         analyze_peak_button.state(state)
         encoder_mode_combobox.state(["readonly"] if enabled else ["disabled"])
         quality_scale.configure(state="normal" if enabled else "disabled")
@@ -463,10 +471,32 @@ def main() -> None:
         run_conversion_button.state(state)
 
     def on_peak_headroom_focus_out() -> None:
+        if disable_gain_adjustment_var.get():
+            return
         if not peak_headroom_db_var.get().strip():
             peak_headroom_db_var.set(format_db(DEFAULT_PEAK_HEADROOM_DB))
         format_decimal_var(peak_headroom_db_var)
         reset_peak_analysis("Headroom changed. Click Analyze peak to recalculate raw plus headroom dB.")
+
+    def update_gain_adjustment_mode(*_: object) -> None:
+        gain_controls_enabled = (
+            not disable_gain_adjustment_var.get()
+            and not peak_analysis_running[0]
+            and not conversion_running[0]
+        )
+        gain_state = ["!disabled"] if gain_controls_enabled else ["disabled"]
+        peak_headroom_db_entry.state(gain_state)
+        calculated_gain_db_entry.state(gain_state)
+        analyze_state = ["disabled"] if peak_analysis_running[0] or conversion_running[0] else ["!disabled"]
+        analyze_peak_button.state(analyze_state)
+        if not disable_gain_adjustment_var.get():
+            if not calculated_gain_db_var.get().strip():
+                reset_peak_analysis("Peak/headroom gain enabled. Click Analyze peak to calculate raw plus headroom dB.")
+        else:
+            status_var.set(
+                "Peak/headroom gain disabled. Analyze peak still records raw peak; files step down by interval."
+            )
+        update_command_preview()
 
     def browse_file() -> None:
         path = filedialog.askopenfilename(
@@ -519,8 +549,10 @@ def main() -> None:
         try:
             headroom_db = float(peak_headroom_db_var.get())
         except ValueError:
-            status_var.set("Enter a valid headroom dB value.")
-            return
+            if not disable_gain_adjustment_var.get():
+                status_var.set("Enter a valid headroom dB value.")
+                return
+            headroom_db = DEFAULT_PEAK_HEADROOM_DB
 
         encoder_mode = ENCODER_MODE_LABELS[encoder_mode_choice_var.get()]
         peak_analysis_running[0] = True
@@ -552,6 +584,13 @@ def main() -> None:
         raw_peak_var.set(f"Raw peak: {format_db(result.max_volume_db, signed=True)} dB")
         peak_target_db = -abs(result.headroom_db)
         calculated_gain_db_var.set(format_db(result.calculated_gain_db))
+        if disable_gain_adjustment_var.get():
+            status_var.set(
+                f"Peak analysis: source max {format_db(result.max_volume_db)} dB. "
+                "Peak/headroom gain is disabled, so raw plus headroom is ignored for conversion."
+            )
+            update_command_preview()
+            return
         status_var.set(
             f"Peak analysis: source max {format_db(result.max_volume_db)} dB, "
             f"target {format_db(peak_target_db)} dB, "
@@ -592,16 +631,25 @@ def main() -> None:
             output_dir, output_stem = parse_output_target()
             min_db, interval_db, step_count = calculate_level_settings()
             update_level_fields()
-            headroom_db = float(peak_headroom_db_var.get())
         except ValueError as error:
             status_var.set(f"Invalid settings: {error}")
             return
 
-        try:
-            calculated_gain_db = float(calculated_gain_db_var.get())
-        except ValueError:
-            status_var.set("Analyze peak or enter raw plus headroom dB.")
-            return
+        if not disable_gain_adjustment_var.get():
+            try:
+                headroom_db: float | None = float(peak_headroom_db_var.get())
+            except ValueError as error:
+                status_var.set(f"Invalid settings: {error}")
+                return
+
+            try:
+                calculated_gain_db: float | None = float(calculated_gain_db_var.get())
+            except ValueError:
+                status_var.set("Analyze peak or enter raw plus headroom dB.")
+                return
+        else:
+            headroom_db = None
+            calculated_gain_db = None
 
         if not source_text:
             status_var.set("Select an input file.")
@@ -635,7 +683,7 @@ def main() -> None:
         plan = build_output_plan(
             source_path=source_path,
             output_dir=output_dir,
-            db_offset=calculated_gain_db,
+            db_offset=calculated_gain_db if calculated_gain_db is not None else 0.0,
             step_count=step_count,
             interval_db=-abs(interval_db),
             output_stem=output_stem,
@@ -661,6 +709,7 @@ def main() -> None:
             if ENCODER_MODE_LABELS[encoder_mode_choice_var.get()] == ENCODER_MODE_QUALITY
             else None,
             overwrite=overwrite_var.get(),
+            gain_adjustment_enabled=not disable_gain_adjustment_var.get(),
         )
 
         conversion_running[0] = True
@@ -875,6 +924,12 @@ def main() -> None:
         bottom_gap=RELATED_CONTROL_GAP_PX,
     )
     peak_headroom_db_entry.bind("<FocusOut>", lambda _event: on_peak_headroom_focus_out())
+    gain_adjustment_checkbutton = ttk.Checkbutton(
+        settings_frame,
+        text="Disable peak/headroom gain",
+        variable=disable_gain_adjustment_var,
+    )
+    gain_adjustment_checkbutton.grid(row=3, column=3, sticky="w", pady=(CONTROL_TITLE_GAP_PX, 0))
 
     calculated_gain_db_entry = add_db_entry(
         settings_frame,
@@ -897,6 +952,7 @@ def main() -> None:
     level_input_mode_var.trace_add("write", update_level_input_mode)
     calculated_gain_db_var.trace_add("write", update_command_preview)
     overwrite_var.trace_add("write", update_command_preview)
+    disable_gain_adjustment_var.trace_add("write", update_gain_adjustment_mode)
     encoder_mode_choice_var.trace_add("write", update_command_preview)
     vorbis_quality_var.trace_add("write", update_vorbis_quality_markers)
     vorbis_quality_var.trace_add("write", update_command_preview)
@@ -1023,6 +1079,7 @@ def main() -> None:
     progress_bar.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(RELATED_CONTROL_GAP_PX, 0))
 
     refresh_tool_status()
+    update_gain_adjustment_mode()
 
     root.mainloop()
 

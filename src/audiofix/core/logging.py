@@ -15,11 +15,12 @@ class ConversionLogSettings:
     min_db: float
     interval_db: float
     raw_peak_db: float | None
-    headroom_db: float
-    calculated_gain_db: float
+    headroom_db: float | None
+    calculated_gain_db: float | None
     encoder_mode: str
     vorbis_quality: float | None
     overwrite: bool
+    gain_adjustment_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -69,9 +70,10 @@ def build_conversion_log_lines(
         f"Output folder: {settings.output_dir}",
         f"Minimum dB: {settings.min_db:.3f}",
         f"Interval dB: {settings.interval_db:.3f}",
+        f"Peak/headroom gain: {'enabled' if settings.gain_adjustment_enabled else 'disabled'}",
         f"Raw peak dB: {_format_optional_db(settings.raw_peak_db)}",
-        f"Headroom dB: {settings.headroom_db:.3f}",
-        f"Raw + Head gain dB: {settings.calculated_gain_db:.3f}",
+        f"Headroom dB: {_format_optional_db(settings.headroom_db)}",
+        f"Raw + Head gain dB: {_format_optional_db(settings.calculated_gain_db)}",
         f"Encoder mode: {settings.encoder_mode}",
         f"Vorbis quality: {_format_optional_number(settings.vorbis_quality)}",
         f"Overwrite: {settings.overwrite}",

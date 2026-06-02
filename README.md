@@ -179,3 +179,66 @@ Out of scope for the current utility:
 - clipping repair
 - compression repair
 - generative audio restoration
+
+
+## Use Case Notes
+### Goal: Change the Volume of a Specific Sound in WoW 
+**Actions Performed in GoldWave**
+
+- WoW doesnt natively support changing the volume of individual sounds, only entire channels of sounds.
+
+- So we must provide a replacement sound file for each desired volume level.
+
+- This utility can make a specific number of files at fixed dB intervals such that different volume levels can be seleted for a specific sound from within the game.
+
+#### Getting Audio Files from WoW
+
+1. Download from **WoWhead**: https://www.wowhead.com/sounds  
+or  
+Extract from game files using **Software**:  
+   - CASCView: http://www.zezula.net/en/casc/main.html
+   - listfile: https://github.com/wowdev/wow-listfile/releases  
+     - in CASCView click the Battle.Net Icon *Game Storage* then select the World of Warcraft installation.
+     - The listfile might be required to parse everything.
+
+1. Save the file(s) as a .wav for future processing, e.g. de-clipping, conversion from mono → stero
+   - `File > Save As... > .wav`
+   - `Attributes... > PCM Signed 24 bit , stereo`
+     - selecting stereo here will convert mono to stereo
+
+**DO ALL PROCESSING ON MONO FIRST !!**
+#### Mono → Stereo Conversion
+- Many WoW audio files are mono.  
+e.g. achievmentsound1, FishingBobber_ver2
+
+- WoW plays these mono audio effects on both the left and right channel simulataneously so they don't have any stereo width. 
+
+- These can be made into stereo audio files by duplicating the original channel so there will be a left and right channel.
+
+- Stereo width can be added by adding an ~ 8 ms silent pad to the beginning of the new duplicate channel, thus shifting the new channel to the right in time.
+  - De-Select the top, left, white channel by unchecking the box in the middle of the channel.
+  - The bottom info-bar should now say `Right`
+  - `Edit > Insert Silence`
+    - `Duration (s): 0.008000`
+    - `Location: Beginning of File`
+    - `OK`
+    - `Save As...` with new name
+
+
+#### Amplitude Correction / De-Clipping
+
+- I've gone back and forth on this, i though these were very lossy badly clipped files. I don't think any of them are terribly lossy for the purposes of the game although they definitely arent HiFi. Some are clipped, some arent.
+
+- File inspection: after converintg to 24 bit PCM wav, use `Tool > Amplitude Statistics` we can see that some of the files are clipped. This clipping is evident in other formats as well. We must account for this before batch compressing to .ogg or the issue will be exacerbated.
+
+- Can we AI resample to reconstruct the missing pieces using somethign like iZotope RX 12? YES
+
+1. open the file in RX 12
+1. select the entire waveform, ctrl + A
+1. open the De-Clip tool
+
+
+
+ ## Acronyms
+
+ - World of Warcraft WoW

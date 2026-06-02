@@ -18,7 +18,11 @@ from audiofix.core.planning import (
 
 from audiofix.core.config import ENCODER_MODE_BITRATE, ENCODER_MODE_QUALITY
 from audiofix.core.analysis import PeakAnalysisRequest, analyze_peak
-from audiofix.core.conversion import ConversionRequest, run_conversion_request
+from audiofix.core.conversion import (
+    ConversionRequest,
+    build_conversion_log_filename,
+    run_conversion_request,
+)
 from audiofix.core.ffmpeg import (
     AudioInfo,
     BinaryStatus,
@@ -77,6 +81,17 @@ class BuildOutputPlanTests(unittest.TestCase):
                 Path("out/levelup2_2.ogg"),
             ],
         )
+
+    def test_builds_numbered_outputs_from_zero_gain_offset(self) -> None:
+        plan = build_output_plan(
+            source_path=Path("levelup2.ogg"),
+            output_dir=Path("out"),
+            db_offset=0.0,
+            step_count=3,
+            interval_db=-3.0,
+        )
+
+        self.assertEqual([item.gain_db for item in plan], [0.0, -3.0, -6.0])
 
     def test_builds_numbered_outputs_with_custom_stem(self) -> None:
         plan = build_output_plan(
@@ -271,6 +286,25 @@ class FfmpegCommandTests(unittest.TestCase):
         self.assertIn("5", command)
         self.assertNotIn("-b:a", command)
 
+    def test_builds_zero_db_volume_filter_for_zero_gain_item(self) -> None:
+        plan = build_output_plan(
+            source_path=Path("source.ogg"),
+            output_dir=Path("out"),
+            db_offset=0.0,
+            step_count=1,
+            interval_db=-3.0,
+        )
+
+        command = build_ffmpeg_command(
+            ffmpeg_path=Path("ffmpeg"),
+            source_path=Path("source.ogg"),
+            item=plan[0],
+            options=FfmpegOptions(),
+        )
+
+        self.assertIn("-filter:a", command)
+        self.assertIn("volume=0dB", command)
+
     def test_validates_output_file_with_ffprobe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "output.ogg"
@@ -299,6 +333,47 @@ class FfmpegCommandTests(unittest.TestCase):
 
 
 class ConversionLogTests(unittest.TestCase):
+    def test_logs_raw_peak_when_peak_headroom_gain_is_disabled(self) -> None:
+        plan = build_output_plan(
+            source_path=Path("source.ogg"),
+            output_dir=Path("out"),
+            db_offset=0.0,
+            step_count=1,
+            interval_db=-3.0,
+        )
+        settings = ConversionLogSettings(
+            source_path=Path("source.ogg"),
+            output_dir=Path("out"),
+            source_channels=2,
+            min_db=-60.0,
+            interval_db=3.0,
+            raw_peak_db=1.0,
+            headroom_db=None,
+            calculated_gain_db=None,
+            encoder_mode="Vorbis Quality",
+            vorbis_quality=6.0,
+            overwrite=False,
+            gain_adjustment_enabled=False,
+        )
+
+        lines = build_conversion_log_lines(
+            settings=settings,
+            items=[
+                ConversionLogItem(
+                    plan_item=plan[0],
+                    status="success",
+                    message="validated",
+                )
+            ],
+            success=True,
+        )
+
+        log_text = "\n".join(lines)
+        self.assertIn("Peak/headroom gain: disabled", log_text)
+        self.assertIn("Raw peak dB: 1.000", log_text)
+        self.assertIn("Headroom dB: unknown", log_text)
+        self.assertIn("Raw + Head gain dB: unknown", log_text)
+
     def test_builds_failed_conversion_log_lines(self) -> None:
         plan = build_output_plan(
             source_path=Path("source.ogg"),
@@ -376,6 +451,25 @@ class PeakAnalysisServiceTests(unittest.TestCase):
 
 
 class ConversionServiceTests(unittest.TestCase):
+    def test_builds_prefixed_conversion_log_filename_from_output_stem(self) -> None:
+        plan = build_output_plan(
+            source_path=Path("source.ogg"),
+            output_dir=Path("out"),
+            db_offset=0.0,
+            step_count=1,
+            interval_db=-3.0,
+            output_stem="achievmentsound1",
+        )
+
+        self.assertEqual(
+            build_conversion_log_filename(plan, success=True),
+            "achievmentsound1_conversion_log.txt",
+        )
+        self.assertEqual(
+            build_conversion_log_filename(plan, success=False),
+            "achievmentsound1_conversion_failed_log.txt",
+        )
+
     def test_runs_conversion_and_writes_success_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
@@ -422,7 +516,7 @@ class ConversionServiceTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.file_count, 1)
         self.assertEqual(progress_updates[0].filename, plan[0].output_path.name)
-        self.assertEqual(result.log_path.name, "conversion_log.txt")
+        self.assertEqual(result.log_path.name, "source_conversion_log.txt")
 
 
 class BackgroundTaskTests(unittest.TestCase):
