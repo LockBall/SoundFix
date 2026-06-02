@@ -242,6 +242,22 @@ e.g. achievmentsound1, FishingBobber_ver2
 1. open the De-Clip tool
 
 
+##### boost a quiet file using Auto Gain
+- Target Volume (dB)  : maintain this level ~ this
+  - effectively sets headroom
+- Update Interval (s) : e.g. 0.5, check loudness twice / sec, adjust if needed
+  - longer is smoother
+- attack / relase (s) : if max then overall amplitude increase is decreased
+  - Attack = how fast it boosts when audio gets quiet
+  - Release = how fast it reduces gain when audio gets loud
+  - 0.100s : React quickly but not instantly — avoid pumping
+- maximum gain (dB)   : eponymous, if 0 then no change
+- Silence Level (dB)  : if max then no change
+  - Any audio below this threshold is treated as silence and ignored by the gain algorithm
+  - At ‑26 dB, anything quieter won’t trigger gain boosts
+  - Prevents Auto Gain from cranking up background noise or tails
+  - keeps gain behavior stable and prevents noise pumping
+ 
 
  ## Acronyms
 
